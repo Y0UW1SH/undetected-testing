@@ -12,6 +12,12 @@ MAPS_SEARCH_NOGEO = "https://www.google.com/maps/search/{q}"
 STARS_RE = re.compile(r"([\d.]+)\s+stars?\s*(?:([\d,]+)\s+reviews?)?", re.I)
 PAREN_RE = re.compile(r"\(([\d,]+)\)")
 PHONE_RE = re.compile(r"^\+?[\d(][\d\s().-]{6,}\d$")
+REVIEWS_TOKEN_RE = re.compile(r"^\([\d,]+\)$")
+RATING_TOKEN_RE = re.compile(r"^\d(\.\d)?$")
+TIME_RE = re.compile(r"^\d{1,2}(:\d{2})?\s?[AP]M\b", re.I)
+STATUS_WORDS = ("open", "closed", "closes", "opens", "temporarily",
+                "permanently", "hours", "no reviews")
+SEP = "\u00b7"
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday",
             "saturday", "sunday")
 COORD_RE = re.compile(r"!3d(-?[\d.]+)!4d(-?[\d.]+)")
@@ -62,39 +68,83 @@ def _rating_reviews(card):
     return rating, reviews
 
 
+def _is_icon(text):
+    """Google renders icons as ligature glyphs in the Unicode private
+    use area; they show up as 1-char text nodes."""
+    return all(0xE000 <= ord(ch) <= 0xF8FF for ch in text)
+
+
 def _tokens(card):
-    """Text lines of a card with every "·" separator as its own token,
-    whether Google rendered it inline ("Plumber · 1 Main St") or as a
-    standalone element between two lines."""
+    """Text lines of a card with every separator (U+00B7 or U+22C5) as
+    its own token, icon glyphs dropped, and repeated separators
+    collapsed, whether Google rendered the separator inline
+    ("Plumber · 1 Main St") or as a standalone element."""
     tokens = []
-    for ln in card.get_text("\n").split("\n"):
+    text = card.get_text("\n").replace("\u22c5", SEP).replace("\u202f", " ")
+    for ln in text.split("\n"):
         ln = ln.strip()
-        if not ln:
+        if not ln or _is_icon(ln):
             continue
-        if "·" in ln:
-            for j, part in enumerate(ln.split("·")):
-                if j:
-                    tokens.append("·")
-                if part.strip():
-                    tokens.append(part.strip())
-        else:
-            tokens.append(ln)
+        for j, part in enumerate(ln.split(SEP)):
+            if j and tokens and tokens[-1] != SEP:
+                tokens.append(SEP)
+            part = part.strip()
+            if part and not _is_icon(part):
+                tokens.append(part)
+    while tokens and tokens[-1] == SEP:
+        tokens.pop()
     return tokens
 
 
-def _card_details(card):
-    """category, address, status, phone from the "a · b" pairs."""
-    tokens = _tokens(card)
+def _looks_like_status(tok):
+    low = tok.lower()
+    return low.startswith(STATUS_WORDS) or bool(TIME_RE.match(tok))
+
+
+def _card_details(card, tokens=None):
+    """category, address, status, phone for one results-feed card.
+
+    Real cards read: name, rating, "(reviews)", category,
+    ["·", address], status fragments separated by "·", phone, then the
+    Website / Directions buttons. Service-area businesses omit the
+    address, so the category is anchored on the review-count token
+    rather than on the first "·" pair."""
+    tokens = tokens if tokens is not None else _tokens(card)
     category = address = status = phone = None
-    for i, tok in enumerate(tokens):
-        if tok != "·" or i == 0 or i + 1 >= len(tokens):
-            continue
-        left, right = tokens[i - 1], tokens[i + 1]
-        if phone is None and PHONE_RE.match(right):
-            phone, status = right, left
-        elif category is None and not any(c.isdigit() for c in left) \
-                and left != "Sponsored":
-            category, address = left, right
+    anchor = next((i for i, t in enumerate(tokens)
+                   if REVIEWS_TOKEN_RE.match(t)), None)
+    if anchor is None:
+        anchor = next((i for i, t in enumerate(tokens)
+                       if RATING_TOKEN_RE.match(t)
+                       or t.lower() == "no reviews"), 0)
+    i = anchor + 1
+    if i < len(tokens) and tokens[i] != SEP \
+            and not any(c.isdigit() for c in tokens[i]) \
+            and not _looks_like_status(tokens[i]) \
+            and not PHONE_RE.match(tokens[i]):
+        category = tokens[i]
+        i += 1
+    if i + 1 < len(tokens) and tokens[i] == SEP \
+            and not _looks_like_status(tokens[i + 1]) \
+            and not PHONE_RE.match(tokens[i + 1]):
+        address = tokens[i + 1]
+        i += 2
+    phone_idx = next((j for j in range(i, len(tokens))
+                      if PHONE_RE.match(tokens[j])), None)
+    if phone_idx is not None:
+        phone = tokens[phone_idx]
+        parts = [t for t in tokens[i:phone_idx] if t != SEP]
+    else:
+        parts = []
+        for t in tokens[i:]:
+            if t == SEP:
+                continue
+            if _looks_like_status(t) or (parts and TIME_RE.match(t)):
+                parts.append(t)
+            else:
+                break
+    status = " %s " % SEP
+    status = status.join(parts) if parts else None
     return category, address, status, phone
 
 
@@ -130,14 +180,15 @@ def parse_feed(html, query, location=""):
             else:
                 break
         rating, reviews = _rating_reviews(card)
-        category, address, status, phone = _card_details(card)
+        tokens = _tokens(card)
+        category, address, status, phone = _card_details(card, tokens)
         lat, lng = coords_from_href(href)
         results.append(models.Business(
             query=query, location=location, position=len(results) + 1,
             name=name, rating=rating, reviews=reviews, category=category,
             address=address, phone=phone, website=_website(card),
             maps_url=href, cid=cid_from_href(href), lat=lat, lng=lng,
-            is_ad=_is_ad(card, _tokens(card)), status=status))
+            is_ad=_is_ad(card, tokens), status=status))
     return results
 
 

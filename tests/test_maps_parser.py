@@ -10,6 +10,7 @@ def test_feed_parse_dedupes_and_extracts_fields(fixture):
     assert (joe.rating, joe.reviews) == (4.8, 312)
     assert joe.category == "Plumber"
     assert joe.address == "123 Main St"
+    assert joe.status == "Open 24 hours" and joe.phone is None
     assert (joe.lat, joe.lng) == (30.2672, -97.7431)
     assert joe.cid == str(int("0x1f2e3d4c5b6a7980", 16))
     assert biz[2].rating is None and biz[2].reviews is None
@@ -54,6 +55,24 @@ def test_live_feed_fixture(fixture):
     second = biz[1]
     assert second.name == "Austin Plumbery" and second.is_ad is False
     assert second.website and "austinplumbery" in second.website
+    # service-area business: category but no address; status fragments
+    # are joined; the phone still comes through
+    assert second.category == "Plumber" and second.address is None
+    assert second.status == "Closes soon · 6 PM · Opens 7 AM Thu"
+    assert second.phone == "+1 512-766-1519"
+    by_name = {b.name: b for b in biz}
+    abacus = by_name["Abacus Plumbing, Air Conditioning & Electrical"]
+    assert abacus.address == "708 S Lamar Blvd G"   # icon glyph skipped
+    assert abacus.status == "Open 24 hours"
+    we_plumb = by_name["We Plumb LLC"]
+    assert (we_plumb.category, we_plumb.address) == ("Plumber", None)
+    assert we_plumb.status == "Open 24 hours"
+    assert we_plumb.phone == "+1 737-297-5863"
+    austin_pl = by_name["Austin Plumbing"]
+    assert austin_pl.address == "5115 N Lamar Blvd Ste 100"
+    assert austin_pl.status == "Open · Closes 11 PM"
+    assert all(b.category == "Plumber" for b in biz)
+    assert all(b.phone for b in biz)
     assert all(b.cid for b in biz)
     assert sum(1 for b in biz if b.is_ad) == 1
     # ads are excluded from the organic rank

@@ -44,7 +44,9 @@ class Session:
         min_pause=1.5,
         max_pause=4.0,
         max_solve_attempts=1,
+        headless=False,
         browser=None,         # injectable for tests
+        **chrome_kwargs,      # passed straight to sb_cdp.Chrome()
     ):
         self.geoloc = tuple(geoloc) if geoloc else None
         self.mobile = mobile
@@ -55,6 +57,8 @@ class Session:
         self.min_pause = min_pause
         self.max_pause = max_pause
         self.max_solve_attempts = max_solve_attempts
+        self.headless = headless
+        self.chrome_kwargs = chrome_kwargs
         self.sb = browser
         self.pages_loaded = 0
 
@@ -71,6 +75,11 @@ class Session:
                 kwargs["geoloc"] = list(self.geoloc)
             if self.tzone:
                 kwargs["tzone"] = self.tzone
+            if self.headless:
+                # Headless is easier to detect; prefer Xvfb (the default
+                # on Linux) unless there is really no display available.
+                kwargs["headless"] = True
+            kwargs.update(self.chrome_kwargs)
             self.sb = sb_cdp.Chrome(**kwargs)
         return self
 

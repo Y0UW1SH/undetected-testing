@@ -45,7 +45,8 @@ def _resolve_location(store, text, lat=None, lng=None):
 
 def _session(args, geoloc=None):
     return Session(geoloc=geoloc, mobile=getattr(args, "mobile", False),
-                   proxy=getattr(args, "proxy", None))
+                   proxy=getattr(args, "proxy", None),
+                   headless=getattr(args, "headless", False))
 
 
 def _print_json(obj):
@@ -218,7 +219,8 @@ def cmd_batch(args, store):
         geoloc = (lat, lng) if lat is not None else None
         mobile = device == "mobile"
         try:
-            with Session(geoloc=geoloc, mobile=mobile, proxy=args.proxy) as s:
+            with Session(geoloc=geoloc, mobile=mobile, proxy=args.proxy,
+                         headless=args.headless) as s:
                 for kind, q, loc, device, extra in batch:
                     table = {"serp": "serp_results", "local": "businesses",
                              "grid": "grid_cells"}[kind]
@@ -297,6 +299,8 @@ def build_parser():
         sp.add_argument("--lng", type=float)
         sp.add_argument("--mobile", action="store_true")
         sp.add_argument("--proxy", help="user:pass@host:port")
+        sp.add_argument("--headless", action="store_true",
+                        help="no display at all (Xvfb is the default)")
 
     sp = sub.add_parser("serp", help="Google web search results")
     sp.add_argument("query")
@@ -355,6 +359,7 @@ def build_parser():
     sp.add_argument("--force", action="store_true")
     sp.add_argument("--on-challenge", choices=("stop", "skip"),
                     default="stop")
+    sp.add_argument("--headless", action="store_true")
     sp.set_defaults(func=cmd_batch)
 
     sp = sub.add_parser("export", help="dump all tables to CSV/JSON")
