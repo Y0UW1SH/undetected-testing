@@ -94,10 +94,16 @@ daily and commits the CSV exports. Set a `SEO_PROXY` repository secret
 (`user:pass@host:port`) to route the scraper through a proxy.
 
 Parsers are unit-tested offline against HTML in `tests/fixtures/`
-(`pytest tests/`). Those fixtures are hand-written to match the
-structural hooks the parsers use; refresh them from live pages with
+(`pytest tests/`). The Maps feed, Maps place page and Google's
+"unusual traffic" page are real captures (`live_*.html`); the web-search
+SERP fixture is hand-written because Google challenged the datacenter
+IP used for capture. Refresh fixtures from live pages with
 `python -m seo capture serp "query" --out tests/fixtures/x.html` when
 Google changes its markup.
+
+On Linux the browser runs under Xvfb by default, which is harder to
+detect than headless mode. Pass `--headless` only where no display is
+possible at all.
 
 Scraping Google is against its Terms of Service; keep volumes modest,
 expect CAPTCHAs from datacenter IPs (including GitHub Actions), and
