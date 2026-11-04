@@ -1,0 +1,17 @@
+[
+  {
+    "location": "Austin, TX",
+    "device": "desktop",
+    "serp": ["emergency plumber", "water heater repair austin"],
+    "local": ["plumber"],
+    "grid": [
+      {"query": "plumber", "target": "Joe's Plumbing", "size": 5,
+       "spacing_km": 1.5}
+    ]
+  },
+  {
+    "location": "Austin, TX",
+    "device": "mobile",
+    "serp": ["plumber near me"]
+  }
+]

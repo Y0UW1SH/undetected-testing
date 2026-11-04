@@ -46,3 +46,59 @@ pip install -r requirements.txt
 seleniumbase install chromedriver
 python raw_walmart.py --debug
 ```
+
+--------
+
+## SERP and local-SEO scraper (`seo/`)
+
+The stealth browser these tests exercise is also wrapped as a small
+scraping tool. Everything goes through `seo/browser.py`, which opens a
+SeleniumBase CDP-mode Chrome with locale, device, proxy and emulated
+geolocation set, dismisses Google's consent dialog, and raises
+`ChallengeError` when Google serves its "unusual traffic" CAPTCHA page.
+
+```bash
+# Google web results for a query as seen from a city (uule + geolocation)
+python -m seo serp "emergency plumber" --location "Austin, TX"
+python -m seo serp "plumber near me" --location "Austin, TX" --mobile
+
+# Google Maps listings, optionally visiting each place for phone/site/hours
+python -m seo local "plumber" --location "Austin, TX" --details
+
+# Local rank grid: where does one business rank across a 5x5 km grid?
+python -m seo grid "plumber" --target "Joe's Plumbing" \
+    --location "Austin, TX" --size 5 --spacing 1.5
+# -> data/grid_joes_plumbing.html heatmap
+
+# Competitor snapshot (top 10 on Maps) with a diff against the last run
+python -m seo snapshot "plumber" --location "Austin, TX"
+
+# NAP consistency: does each directory list the same phone and address?
+python -m seo nap "Joe's Plumbing" --phone 512-555-0100 \
+    --address "123 Main St, Austin, TX 78701" --city "Austin, TX"
+
+# Everything in a JSON config, new browser every 3 jobs, stop on challenge
+cp seo/config/keywords.example.json seo/config/keywords.json
+python -m seo batch --config seo/config/keywords.json --per-session 3
+
+# How often does Google challenge this IP? (exit 1 above 50%)
+python -m seo canary --queries 20 --fail-above 50
+
+python -m seo export --format csv     # data/*.csv from data/seo.sqlite
+```
+
+Results are stored in `data/seo.sqlite` (one table per record type) and
+a query is skipped if it was already fetched today unless `--force` is
+given. `.github/workflows/seo.yml` runs the canary plus the batch config
+daily and commits the CSV exports. Set a `SEO_PROXY` repository secret
+(`user:pass@host:port`) to route the scraper through a proxy.
+
+Parsers are unit-tested offline against HTML in `tests/fixtures/`
+(`pytest tests/`). Those fixtures are hand-written to match the
+structural hooks the parsers use; refresh them from live pages with
+`python -m seo capture serp "query" --out tests/fixtures/x.html` when
+Google changes its markup.
+
+Scraping Google is against its Terms of Service; keep volumes modest,
+expect CAPTCHAs from datacenter IPs (including GitHub Actions), and
+prefer the official Places API for Maps business details at scale.

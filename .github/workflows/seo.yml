@@ -1,0 +1,88 @@
+name: SEO tracking
+
+on:
+  schedule:
+    # Daily; keep volume low so the shared Actions IP pool stays usable.
+    - cron: "41 9 * * *"
+  workflow_dispatch:
+    inputs:
+      config:
+        description: "JSON config path"
+        default: "seo/config/keywords.json"
+      canary_only:
+        description: "Only measure the Google challenge rate"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: seo-tracking
+  cancel-in-progress: false
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PY_COLORS: "1"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          pip install -r requirements.txt
+          seleniumbase install chromedriver
+
+      - name: Canary (how often does Google challenge this runner?)
+        run: |
+          python -m seo canary --queries 5 --per-session 1 \
+            --fail-above 80 || echo "::warning::High challenge rate"
+
+      - name: Run tracked keywords
+        if: ${{ inputs.canary_only != true }}
+        env:
+          SEO_PROXY: ${{ secrets.SEO_PROXY }}
+        run: |
+          CONFIG="${{ inputs.config || 'seo/config/keywords.json' }}"
+          if [ ! -f "$CONFIG" ]; then
+            echo "::notice::$CONFIG not found; copying the example"
+            cp seo/config/keywords.example.json "$CONFIG"
+          fi
+          PROXY_ARG=""
+          if [ -n "$SEO_PROXY" ]; then PROXY_ARG="--proxy $SEO_PROXY"; fi
+          python -m seo batch --config "$CONFIG" --per-session 3 \
+            --on-challenge stop $PROXY_ARG
+
+      - name: Export tables
+        if: always()
+        run: python -m seo export --format csv
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: seo-results
+          path: |
+            data/
+            downloaded_files/
+          if-no-files-found: ignore
+
+      - name: Commit CSV exports
+        if: ${{ github.event_name != 'pull_request' && inputs.canary_only != true }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/*.csv data/*.html 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No data changes to commit."
+          else
+            git commit -m "Update SEO tracking data [skip ci]"
+            git push
+          fi
