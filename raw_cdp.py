@@ -1,5 +1,4 @@
 """Example of using CDP Mode without WebDriver"""
-from contextlib import suppress
 from seleniumbase import decorators
 from seleniumbase.core import sb_cdp
 
@@ -29,11 +28,11 @@ def main():
         sb.scroll_down(50)
         sb.sleep(0.2)
     cards = sb.select_all('span[data-automation*="product-list-card"]')
+    sb.assert_true(len(cards) > 0, "No experience cards found!")
     for card in cards:
         print("* %s" % card.text)
     sb.driver.stop()
 
 
 if __name__ == "__main__":
-    with suppress(Exception):
-        main()
+    main()

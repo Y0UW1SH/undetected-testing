@@ -37,8 +37,8 @@ with SB(uc=True, test=True, locale="en", pls="none") as sb:
     sb.press_keys('input[type="search"]', search)
     sb.sleep(4)
     elements = sb.select_all('ul[data-testid*="products"] figure .details')
-    if elements:
-        print('**** Found results for "%s": ****' % search)
+    sb.assert_true(len(elements) > 0, 'No results for "%s"!' % search)
+    print('**** Found results for "%s": ****' % search)
     for element in elements:
         print("* " + element.text)
     sb.save_screenshot_to_logs()

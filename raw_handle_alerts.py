@@ -8,11 +8,14 @@ with SB(uc=True, test=True) as sb:
     sb.sleep(1)
     sb.uc_gui_press_key("\n")  # Accept Alert
     sb.sleep(1)
+    sb.assert_text("You successfully clicked an alert", "#result")
     sb.click('button[onclick="jsConfirm()"]')
     sb.sleep(1)
     sb.uc_gui_press_key("ESC")  # Dismiss Alert
     sb.sleep(1)
+    sb.assert_text("You clicked: Cancel", "#result")
     sb.click('button[onclick="jsPrompt()"]')
     sb.sleep(1)
     sb.uc_gui_write("Here is my prompt answer\n")
     sb.sleep(1)
+    sb.assert_text("You entered: Here is my prompt answer", "#result")

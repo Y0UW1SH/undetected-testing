@@ -16,5 +16,6 @@ with SB(uc=True, test=True, guest=True) as sb:
     for i, item in enumerate(items):
         print("* %s: %s" % (i, str(item.get_attribute("alt"))))
     print("*** %s total items found!" % len(items))
+    sb.assert_true(len(items) > 0, "No videos found on the profile!")
     sb.sleep(1)
     sb.save_screenshot_to_logs()

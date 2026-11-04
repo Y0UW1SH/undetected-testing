@@ -18,6 +18,10 @@ with SB(uc=True, test=True, incognito=True) as sb:
     sb.click_if_visible('[aria-label*="NASA"] img')
     sb.sleep(2)
     print(sb.get_page_title())
+    sb.assert_true(
+        "Just a moment" not in sb.get_page_title(), "Still on challenge!"
+    )
+    sb.assert_element('[data-test="global-nav-glassdoor-logo"]')
     print("Bypassed anti-bot defenses!")
     sb.save_as_pdf_to_logs()
     sb.save_page_source_to_logs()

@@ -24,7 +24,9 @@ with SB(uc=True, test=True, ad_block=True, pls="none") as sb:
     print(">>> (Link: %s) <<<" % link)
     print(sb.get_text('[class*="grid lg:hidden"]'))
     print("********** SocialBlade Ranks: **********")
-    print(sb.get_text('[class*="gap-3 flex-1"]'))
+    ranks = sb.get_text('[class*="gap-3 flex-1"]')
+    print(ranks)
+    sb.assert_true("Rank" in ranks, "Rank data missing!")
     for i in range(17):
         sb.scroll_down(6)
         sb.sleep(0.1)

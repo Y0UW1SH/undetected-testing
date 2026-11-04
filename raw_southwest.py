@@ -37,6 +37,7 @@ with SB(uc=True, test=True, locale="en", ad_block=True) as sb:
     day = sb.get_text('[aria-current="true"] span[class*="cal"]')
     print("**** Flights from %s to %s ****" % (origin, destination))
     flights = sb.find_elements("li.air-booking-select-detail")
+    sb.assert_true(len(flights) > 0, "No flights listed!")
     for flight in flights:
         info = flight.text
         departs = info.split("Departs")[-1].split("M")[0].strip() + "M"

@@ -40,3 +40,7 @@ with SB(uc=True, test=True, guest=True) as sb:
                     if price:
                         price_text = "$%s" % price.get_text(strip=True)
                         print("   (" + price_text + ")")
+    sb.assert_true(
+        len(unique_item_text) > 0, 'No "%s" products found!' % required_text
+    )
+    sb.save_screenshot_to_logs()

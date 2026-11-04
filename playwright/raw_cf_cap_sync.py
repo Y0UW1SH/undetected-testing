@@ -11,3 +11,6 @@ with sync_playwright() as p:
     sb.sleep(3)
     sb.solve_captcha()
     sb.sleep(3)
+    title = page.title()
+    print(title)
+    assert "Just a moment" not in title, "Still on the challenge page!"

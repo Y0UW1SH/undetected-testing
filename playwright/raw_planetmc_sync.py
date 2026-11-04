@@ -4,14 +4,12 @@ from seleniumbase import sb_cdp
 sb = sb_cdp.Chrome()
 endpoint_url = sb.get_endpoint_url()
 
-try:
-    with sync_playwright() as p:
-        browser = p.chromium.connect_over_cdp(endpoint_url)
-        page = browser.contexts[0].pages[0]
-        page.goto("https://www.planetminecraft.com/account/sign_in/")
-        sb.sleep(2)
-        sb.solve_captcha()
-        sb.wait_for_element_absent("input[disabled]")
-        sb.sleep(2)
-except Exception as e:
-    print(e)
+with sync_playwright() as p:
+    browser = p.chromium.connect_over_cdp(endpoint_url)
+    page = browser.contexts[0].pages[0]
+    page.goto("https://www.planetminecraft.com/account/sign_in/")
+    sb.sleep(2)
+    sb.solve_captcha()
+    sb.wait_for_element_absent("input[disabled]")
+    sb.assert_element('input[name="login"]')
+    sb.sleep(2)

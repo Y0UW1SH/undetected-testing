@@ -25,5 +25,6 @@ with SB(uc=True, test=True, ad_block=True) as sb:
     soup = sb.get_beautiful_soup(chat.get_html()).text.strip()
     soup = soup.replace("\n\n\n", "\n\n")
     print("*** Response from ChatGPT: ***\n%s" % soup)
+    sb.assert_true(len(soup) > 20, "ChatGPT response was empty!")
     sb.sleep(3)
     sb.save_screenshot_to_logs()

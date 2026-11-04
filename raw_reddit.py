@@ -12,6 +12,7 @@ with SB(uc=True, test=True, use_chromium=True) as sb:
         sb.scroll_down(25)
         sb.sleep(0.2)
     posts = sb.select_all(post_title)
+    sb.assert_true(len(posts) > 0, "No Reddit posts found!")
     print('*** Reddit Posts for "%s":' % search)
     for post in posts:
         print("* " + post.text)

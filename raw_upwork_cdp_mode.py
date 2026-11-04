@@ -10,5 +10,7 @@ with SB(uc=True, test=True) as sb:
     sb.sleep(1)
     sb.press_keys('input[type="search"]', "WordPress\n")
     sb.sleep(2)
-    print(sb.get_text('[data-test="JobsList"]'))
+    jobs = sb.get_text('[data-test="JobsList"]')
+    print(jobs)
+    sb.assert_true("WordPress" in jobs, "No WordPress jobs listed!")
     sb.save_screenshot_to_logs()

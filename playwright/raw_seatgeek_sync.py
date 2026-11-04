@@ -5,22 +5,20 @@ sb = sb_cdp.Chrome(locale="en", ad_block=True)
 sb.goto("https://seatgeek.com/")
 endpoint_url = sb.get_endpoint_url()
 
-try:
-    with sync_playwright() as p:
-        browser = p.chromium.connect_over_cdp(endpoint_url)
-        page = browser.contexts[0].pages[0]
-        input_field = 'input[name="search"]'
-        page.wait_for_selector(input_field)
-        sb.sleep(1.6)
-        query = "Jerry Seinfeld"
-        sb.press_keys(input_field, query)
-        sb.sleep(1.6)
-        page.click("li#active-result-item")
-        sb.sleep(4.2)
-        print('*** SeatGeek Search for "%s":' % query)
-        items = page.locator('[data-testid="listing-item"]')
-        for i in range(items.count()):
-            item_text = items.nth(i).inner_text()
-            print(item_text.replace("\n\n", "\n"))
-except Exception as e:
-    print(e)
+with sync_playwright() as p:
+    browser = p.chromium.connect_over_cdp(endpoint_url)
+    page = browser.contexts[0].pages[0]
+    input_field = 'input[name="search"]'
+    page.wait_for_selector(input_field)
+    sb.sleep(1.6)
+    query = "Jerry Seinfeld"
+    sb.press_keys(input_field, query)
+    sb.sleep(1.6)
+    page.click("li#active-result-item")
+    sb.sleep(4.2)
+    print('*** SeatGeek Search for "%s":' % query)
+    items = page.locator('[data-testid="listing-item"]')
+    assert items.count() > 0, 'No listings for "%s"!' % query
+    for i in range(items.count()):
+        item_text = items.nth(i).inner_text()
+        print(item_text.replace("\n\n", "\n"))

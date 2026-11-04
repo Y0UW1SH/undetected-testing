@@ -39,6 +39,7 @@ with SB(uc=True, test=True, locale="en", guest=True, pls="none") as sb:
         sb.scroll_to_y(y * 200)
         sb.sleep(0.4)
     hotels = sb.find_elements('div[data-vis-key*="content"]')
+    sb.assert_true(len(hotels) > 0, "No hotel result cards found!")
     count = 0
     for hotel in hotels:
         title = hotel.query_selector("h3")

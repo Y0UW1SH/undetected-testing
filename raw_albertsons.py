@@ -31,4 +31,8 @@ with SB(uc=True, test=True, locale="en") as sb:
             if item.text not in unique_item_text:
                 unique_item_text.append(item.text)
                 print("* " + item.text)
+    sb.assert_true(
+        len(unique_item_text) > 0,
+        'No "%s" recipes found. Blocked or layout changed?' % required_text,
+    )
     sb.save_screenshot_to_logs()

@@ -44,6 +44,7 @@ with SB(uc=True, test=True, guest=True) as sb:
     info = sb.find_element('[data-testid="AboutSection-section"]')
     soup = sb.get_beautiful_soup(info.get_html()).get_text("\n").strip()
     print("*** %s: ***\n%s" % (company, soup.replace("\n:", ":")))
+    sb.assert_true(len(soup) > 0, "Company 'About' section was empty!")
     sb.save_screenshot_to_logs()
     sb.save_page_source_to_logs()
     sb.save_as_pdf_to_logs()

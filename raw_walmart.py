@@ -37,4 +37,7 @@ with SB(uc=True, test=True, ad_block=True) as sb:
                     price_text = price_text.split("current price ")[-1]
                     print("  (" + price_text + ")")
                 item.scroll_into_view()
+    sb.assert_true(
+        len(unique_item_text) > 0, 'No "%s" products found!' % required_text
+    )
     sb.save_screenshot_to_logs()

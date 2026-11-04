@@ -24,11 +24,15 @@ with SB(uc=True, test=True, locale="en", guest=True) as sb:
     dates = dates.replace("  ", " ")
     print("(Dates: %s)" % dates)
     flip_cards = sb.select_all(".flipCard")
+    sb.assert_true(len(flip_cards) > 0, "No hotel cards found!")
+    listed = 0
     for i, flip_card in enumerate(flip_cards):
         hotel = flip_card.query_selector(".hotelName")
         price = flip_card.query_selector(".priceSection")
         if hotel and price:
+            listed += 1
             print("* %s: %s => %s" % (
                 i + 1, hotel.text.strip(), price.text.strip())
             )
+    sb.assert_true(listed > 0, "No hotel names/prices were parsed!")
     sb.save_screenshot_to_logs()

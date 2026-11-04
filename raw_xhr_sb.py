@@ -69,6 +69,7 @@ with SB(uc=True, test=True, locale="en") as sb:
 
     loop = sb.cdp.get_event_loop()
     xhr_responses = loop.run_until_complete(receiveXHR(tab, xhr_requests))
+    sb.assert_true(len(xhr_responses) > 0, "No XHR responses captured!")
     for response in xhr_responses:
         print(c1 + "*** ==> XHR Request URL <== ***" + cr)
         print(f'{response["url"]}')

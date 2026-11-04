@@ -31,4 +31,5 @@ with SB(uc=True, test=True, locale="en") as sb:
     sb.add_handler(mycdp.network.ResponseReceived, receive_handler)
     url = "https://seleniumbase.io/apps/calculator"
     sb.goto(url)
+    sb.assert_element("#output")
     sb.sleep(1)

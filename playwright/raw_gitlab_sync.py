@@ -14,4 +14,5 @@ with sync_playwright() as p:
     page.locator('label[for="user_login"]').click()
     page.wait_for_selector('[data-testid="sign-in-button"]')
     page.locator("#user_login").fill("Username")
+    assert page.locator("#user_login").input_value() == "Username"
     sb.sleep(2)

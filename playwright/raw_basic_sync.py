@@ -12,4 +12,5 @@ with sync_playwright() as p:
     page.fill("#password", "secret_pass")
     page.click("#log-in")
     page.wait_for_selector("h1")
+    assert "Welcome" in page.inner_text("h1"), "Login did not succeed!"
     sb.sleep(1)

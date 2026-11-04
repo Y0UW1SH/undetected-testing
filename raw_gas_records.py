@@ -20,6 +20,7 @@ with SB(uc=True, test=True) as sb:
     sb.click("button.search-button")
     sb.sleep(3)
     results = sb.find_elements("div.search-result")
+    sb.assert_true(len(results) > 0, "No search results found!")
     for result in results:
         print(result.text.replace(" " * 12, " ").strip() + "\n")
     sb.scroll_to_bottom()

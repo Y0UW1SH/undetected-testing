@@ -5,53 +5,51 @@ sb = sb_cdp.Chrome(locale="en", guest=True)
 sb.goto("https://www.walmart.com/")
 endpoint_url = sb.get_endpoint_url()
 
-try:
-    with sync_playwright() as p:
-        browser = p.chromium.connect_over_cdp(endpoint_url)
-        page = browser.contexts[0].pages[0]
-        search_box = 'input[aria-label="Search"]'
-        search = "Settlers of Catan Board Game"
-        required_text = "Catan"
-        page.wait_for_timeout(1800)
-        sb.click(search_box)
-        page.wait_for_timeout(1200)
-        sb.press_keys(search_box, search + "\n")
-        sb.sleep(3.8)
-        sb.remove_elements('[data-testid="skyline-ad"]')
-        sb.remove_elements('[data-testid="sba-container"]')
-        print('*** Walmart Search for "%s":' % search)
-        print('    (Results must contain "%s".)' % required_text)
-        unique_item = []
-        pop_up = '[data-automation-id="sb-btn-close-mark"]'
-        if page.locator(pop_up).count() > 0:
-            page.click(pop_up)
-        page.wait_for_timeout(1200)
-        page.wait_for_selector('[data-item-id]', timeout=10000)
-        page.wait_for_timeout(600)
-        for i in range(10):
-            sb.scroll_down(16)
-        items = page.locator('[data-item-id]')
-        for i in range(items.count()):
-            item = items.nth(i)
-            if required_text.lower() in item.inner_text().lower():
-                description = item.locator(
-                    '[data-automation-id="product-title"]'
+with sync_playwright() as p:
+    browser = p.chromium.connect_over_cdp(endpoint_url)
+    page = browser.contexts[0].pages[0]
+    search_box = 'input[aria-label="Search"]'
+    search = "Settlers of Catan Board Game"
+    required_text = "Catan"
+    page.wait_for_timeout(1800)
+    sb.click(search_box)
+    page.wait_for_timeout(1200)
+    sb.press_keys(search_box, search + "\n")
+    sb.sleep(3.8)
+    sb.remove_elements('[data-testid="skyline-ad"]')
+    sb.remove_elements('[data-testid="sba-container"]')
+    print('*** Walmart Search for "%s":' % search)
+    print('    (Results must contain "%s".)' % required_text)
+    unique_item = []
+    pop_up = '[data-automation-id="sb-btn-close-mark"]'
+    if page.locator(pop_up).count() > 0:
+        page.click(pop_up)
+    page.wait_for_timeout(1200)
+    page.wait_for_selector('[data-item-id]', timeout=10000)
+    page.wait_for_timeout(600)
+    for i in range(10):
+        sb.scroll_down(16)
+    items = page.locator('[data-item-id]')
+    for i in range(items.count()):
+        item = items.nth(i)
+        if required_text.lower() in item.inner_text().lower():
+            description = item.locator(
+                '[data-automation-id="product-title"]'
+            )
+            if (
+                description
+                and description.is_visible()
+                and description.inner_text() not in unique_item
+            ):
+                unique_item.append(description.inner_text())
+                print("* " + description.inner_text())
+                price = item.locator(
+                    '[data-testid="unified-global-product-price"]'
                 )
-                if (
-                    description
-                    and description.is_visible()
-                    and description.inner_text() not in unique_item
-                ):
-                    unique_item.append(description.inner_text())
-                    print("* " + description.inner_text())
-                    price = item.locator(
-                        '[data-testid="unified-global-product-price"]'
-                    )
-                    if price.count() > 0:
-                        price_text = price.inner_text().strip()
-                        if price_text:
-                            price_text = price_text.split("current price ")[-1]
-                            price_text = price_text.replace("\n", " ")
-                            print("  (" + price_text + ")")
-except Exception as e:
-    print(e)
+                if price.count() > 0:
+                    price_text = price.inner_text().strip()
+                    if price_text:
+                        price_text = price_text.split("current price ")[-1]
+                        price_text = price_text.replace("\n", " ")
+                        print("  (" + price_text + ")")
+    assert len(unique_item) > 0, 'No "%s" products found!' % required_text

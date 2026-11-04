@@ -24,4 +24,5 @@ with SB(uc=True, test=True, locale="en") as sb:
             if price:
                 price_text = price.text
                 print("* %s (%s)" % (description.text, price_text))
+    sb.assert_true(len(unique_item_text) > 0, "No products found!")
     sb.save_screenshot_to_logs()

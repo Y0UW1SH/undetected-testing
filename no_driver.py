@@ -10,7 +10,9 @@ async def main():
     browser = await nodriver.start()
     page = await browser.get("https://www.virtualmanager.com/en/login")
     time.sleep(3)
-    print(await page.evaluate("document.title"))
+    title = await page.evaluate("document.title")
+    print(title)
+    assert title and "Just a moment" not in title, "Blocked: %r" % title
     display.stop()
 
 if __name__ == "__main__":

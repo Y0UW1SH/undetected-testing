@@ -32,6 +32,7 @@ with SB(uc=True, test=True, locale="en", ad_block=True) as sb:
             break
     sb.click_if_visible("button#ensCloseBanner")
     days = sb.find_elements('div[class*="FlightGridLayout_column"]')
+    sb.assert_true(len(days) > 0, "No flight-grid columns found!")
     for day in days:
         if not day.text.strip():
             continue

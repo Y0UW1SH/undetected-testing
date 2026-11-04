@@ -14,8 +14,8 @@ with SB(uc=True, test=True, locale="en", ad_block=True) as sb:
     sb.click('ul[id*="typeahead"] li div')
     sb.sleep(3.5)
     elements = sb.select_all("a.ProductCard-link")
-    if elements:
-        print('**** Found results for "%s": ****' % search)
+    sb.assert_true(len(elements) > 0, 'No results for "%s"!' % search)
+    print('**** Found results for "%s": ****' % search)
     for element in elements:
         print("------------------ >>>")
         print("* " + element.text)

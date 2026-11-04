@@ -22,7 +22,9 @@ with SB(uc=True, test=True, locale="en", guest=True) as sb:
     card_info = 'div[data-booking-status="BOOKABLE"] [class*="HotelCard_info"]'
     hotels = sb.select_all(card_info)
     print("Hyatt Hotels in %s:" % location)
-    print("(" + sb.get_text('span[class*="summary_destination"]') + ")")
+    destination = sb.get_text('span[class*="summary_destination"]')
+    print("(" + destination + ")")
+    sb.assert_true("Anaheim" in destination, "Wrong search destination!")
     if len(hotels) == 0:
         print("No availability over the selected dates!")
     for hotel in hotels:

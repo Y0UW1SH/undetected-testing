@@ -11,8 +11,8 @@ with SB(uc=True, test=True, locale="en", pls="none") as sb:
     sb.sleep(4)
     details = 'ul[data-testid*="products"] figure .details'
     elements = sb.select_all(details)
-    if elements:
-        print('**** Found results for "%s": ****' % search)
+    sb.assert_true(len(elements) > 0, 'No results for "%s"!' % search)
+    print('**** Found results for "%s": ****' % search)
     for element in elements:
         print("* " + element.text)
     sb.sleep(2)
