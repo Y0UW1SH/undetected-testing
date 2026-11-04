@@ -14,6 +14,9 @@ def test_is_challenge_page(fixture):
     assert not is_challenge_page(
         "https://consent.google.com/m?continue=x", "Before you continue",
         "<html></html>")
+    # the real thing, captured from a datacenter IP
+    assert is_challenge_page("https://www.google.com/search?q=a", "",
+                             fixture("live_google_sorry.html"))
 
 
 class FakeBrowser:

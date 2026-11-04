@@ -11,6 +11,9 @@ MAPS_SEARCH = "https://www.google.com/maps/search/{q}/@{lat},{lng},{zoom}z"
 MAPS_SEARCH_NOGEO = "https://www.google.com/maps/search/{q}"
 STARS_RE = re.compile(r"([\d.]+)\s+stars?\s*(?:([\d,]+)\s+reviews?)?", re.I)
 PAREN_RE = re.compile(r"\(([\d,]+)\)")
+PHONE_RE = re.compile(r"^\+?[\d(][\d\s().-]{6,}\d$")
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday",
+            "saturday", "sunday")
 COORD_RE = re.compile(r"!3d(-?[\d.]+)!4d(-?[\d.]+)")
 FEATURE_RE = re.compile(r"!1s(0x[0-9a-f]+):(0x[0-9a-f]+)", re.I)
 END_OF_LIST = "You've reached the end of the list"
@@ -59,17 +62,52 @@ def _rating_reviews(card):
     return rating, reviews
 
 
-def _category_address(card):
-    category = address = None
+def _tokens(card):
+    """Text lines of a card with every "·" separator as its own token,
+    whether Google rendered it inline ("Plumber · 1 Main St") or as a
+    standalone element between two lines."""
+    tokens = []
     for ln in card.get_text("\n").split("\n"):
         ln = ln.strip()
-        if "·" not in ln:
+        if not ln:
             continue
-        parts = [p.strip() for p in ln.split("·") if p.strip()]
-        if len(parts) >= 2 and not any(c.isdigit() for c in parts[0]):
-            category, address = parts[0], parts[1]
-            break
-    return category, address
+        if "·" in ln:
+            for j, part in enumerate(ln.split("·")):
+                if j:
+                    tokens.append("·")
+                if part.strip():
+                    tokens.append(part.strip())
+        else:
+            tokens.append(ln)
+    return tokens
+
+
+def _card_details(card):
+    """category, address, status, phone from the "a · b" pairs."""
+    tokens = _tokens(card)
+    category = address = status = phone = None
+    for i, tok in enumerate(tokens):
+        if tok != "·" or i == 0 or i + 1 >= len(tokens):
+            continue
+        left, right = tokens[i - 1], tokens[i + 1]
+        if phone is None and PHONE_RE.match(right):
+            phone, status = right, left
+        elif category is None and not any(c.isdigit() for c in left) \
+                and left != "Sponsored":
+            category, address = left, right
+    return category, address, status, phone
+
+
+def _is_ad(card, tokens):
+    if card.select_one('button[aria-label*="Why this ad"]') is not None:
+        return True
+    return "Sponsored" in tokens[:3]
+
+
+def _website(card):
+    node = card.select_one(
+        'a[aria-label^="Visit "], a[data-value="Website"]')
+    return node.get("href") if node is not None else None
 
 
 def parse_feed(html, query, location=""):
@@ -92,13 +130,14 @@ def parse_feed(html, query, location=""):
             else:
                 break
         rating, reviews = _rating_reviews(card)
-        category, address = _category_address(card)
+        category, address, status, phone = _card_details(card)
         lat, lng = coords_from_href(href)
         results.append(models.Business(
             query=query, location=location, position=len(results) + 1,
             name=name, rating=rating, reviews=reviews, category=category,
-            address=address, maps_url=href, cid=cid_from_href(href),
-            lat=lat, lng=lng))
+            address=address, phone=phone, website=_website(card),
+            maps_url=href, cid=cid_from_href(href), lat=lat, lng=lng,
+            is_ad=_is_ad(card, _tokens(card)), status=status))
     return results
 
 
@@ -140,7 +179,7 @@ def _hours(main):
     for tr in main.select("table tr"):
         cells = [_text(td) for td in tr.find_all(["td", "th"])]
         cells = [c for c in cells if c]
-        if len(cells) >= 2:
+        if len(cells) >= 2 and cells[0].lower().startswith(WEEKDAYS):
             rows.append("%s: %s" % (cells[0], cells[1]))
     if rows:
         return "; ".join(rows)
@@ -182,10 +221,10 @@ def fetch_listings(session, query, lat=None, lng=None, location_label="",
                 continue
             session.goto(biz.maps_url)
             info = parse_place(session.html())
-            for key in ("phone", "website", "hours"):
-                setattr(biz, key, info.get(key))
-            for key in ("rating", "reviews", "category", "address"):
-                if getattr(biz, key) is None:
+            biz.hours = info.get("hours")
+            for key in ("phone", "website", "rating", "reviews",
+                        "category", "address"):
+                if info.get(key) is not None:
                     setattr(biz, key, info.get(key))
             session.pause()
     return businesses

@@ -1,9 +1,20 @@
 # Parser fixtures
 
-These HTML files are **hand-written** to mirror the structural hooks the
+Files prefixed `live_` were captured from real Google pages with a
+headless browser (scripts, styles and image sources stripped):
+
+* `live_maps_feed.html`: Maps results feed for "plumber austin tx"
+* `live_maps_place.html`: a Maps place page (service-area business, so
+  it has no street address)
+* `live_google_sorry.html`: the "unusual traffic" challenge page that
+  Google web search served to the same headless browser
+
+The other files are **hand-written** to mirror the structural hooks the
 parsers rely on (`a[href] h3`, `[data-q]`, `[data-cid]`, `#tads`,
-`div[role="feed"]`, `data-item-id`, ...). They are not captured from a
-live browser. Refresh them with real pages whenever Google changes
+`div[role="feed"]`, `data-item-id`, ...). No live web-search SERP has
+been captured yet because Google challenged the datacenter IP used for
+capture; the first successful `python -m seo capture serp ...` from a
+clean IP should be added here. Refresh fixtures whenever Google changes
 markup:
 
     python -m seo capture serp "emergency plumber austin" \

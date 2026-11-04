@@ -36,6 +36,48 @@ def test_build_maps_url():
         "https://www.google.com/maps/search/x?hl=en")
 
 
+def test_live_feed_fixture(fixture):
+    """Captured from a real Maps results page (scripts stripped)."""
+    biz = maps.parse_feed(fixture("live_maps_feed.html"),
+                          "plumber austin tx", "Austin, TX")
+    assert len(biz) == 10
+    first = biz[0]
+    assert first.name == "LoneSprings Plumbing"
+    assert first.is_ad is True
+    assert (first.rating, first.reviews) == (4.9, 49)
+    assert first.category == "Plumber"
+    assert first.address == "1 Pine Point Drive"
+    assert first.status == "Open 24 hours"
+    assert first.phone == "(512) 798-3755"
+    assert first.cid == "306376917645060018"
+    assert (first.lat, first.lng) == (30.105061, -97.288002)
+    second = biz[1]
+    assert second.name == "Austin Plumbery" and second.is_ad is False
+    assert second.website and "austinplumbery" in second.website
+    assert all(b.cid for b in biz)
+    assert sum(1 for b in biz if b.is_ad) == 1
+    # ads are excluded from the organic rank
+    assert grid.find_rank(biz, "Austin Plumbery") == 1
+    assert grid.find_rank(biz, "Austin Plumbery", include_ads=True) == 2
+    assert grid.find_rank(biz, "LoneSprings Plumbing") is None
+    assert grid.find_rank(biz, "LoneSprings Plumbing",
+                          include_ads=True) == 1
+
+
+def test_live_place_fixture(fixture):
+    info = maps.parse_place(fixture("live_maps_place.html"))
+    assert info["name"] == "Austin Plumbery"
+    assert info["rating"] == 4.8 and info["reviews"] == 228
+    assert info["category"] == "Plumber"
+    assert info["phone"] == "+15127661519"
+    assert info["website"] == "http://www.austinplumbery.com/"
+    assert info["address"] is None          # service-area business
+    hours = info["hours"]
+    assert hours.count(";") == 6            # exactly seven weekdays
+    assert "Wednesday: 7 AM–6 PM" in hours
+    assert "stars" not in hours             # rating-histogram rows skipped
+
+
 def test_find_rank_by_name_and_cid(fixture):
     biz = maps.parse_feed(fixture("google_maps_feed.html"), "plumber")
     assert grid.find_rank(biz, "joes plumbing") == 1

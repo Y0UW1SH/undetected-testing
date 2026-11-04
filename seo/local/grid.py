@@ -15,21 +15,22 @@ def normalize_name(name):
     return " ".join(_PUNCT.sub(" ", name).split())
 
 
-def find_rank(businesses, target):
-    """1-based position of `target` in a list of Business records, or None.
-    Matches on normalized name containment so 'Joe's Plumbing LLC'
-    matches 'Joes Plumbing'. If `target` looks like a CID it is matched
-    exactly against Business.cid."""
-    if target.isdigit():
-        for biz in businesses:
-            if biz.cid == target:
-                return biz.position
-        return None
+def find_rank(businesses, target, include_ads=False):
+    """1-based organic rank of `target` in a list of Business records,
+    or None. Sponsored listings are skipped unless include_ads=True, so
+    the rank matches what rank trackers report. Matches on normalized
+    name containment ('Joe's Plumbing LLC' matches 'Joes Plumbing'); a
+    numeric target is matched exactly against Business.cid."""
+    ranked = [b for b in businesses if include_ads or not b.is_ad]
     t = normalize_name(target)
-    for biz in businesses:
+    for rank, biz in enumerate(ranked, start=1):
+        if target.isdigit():
+            if biz.cid == target:
+                return rank
+            continue
         n = normalize_name(biz.name)
         if t and (t in n or n in t):
-            return biz.position
+            return rank
     return None
 
 

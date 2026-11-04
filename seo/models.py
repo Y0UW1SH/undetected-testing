@@ -67,6 +67,8 @@ class Business(_Record):
     cid: Optional[str] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
+    is_ad: bool = False
+    status: Optional[str] = None     # e.g. "Open 24 hours", "Closed"
     fetched_at: str = field(default_factory=utcnow)
 
 
