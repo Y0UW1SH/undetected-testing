@@ -134,6 +134,44 @@ class SubnetStat(_Record):
 
 
 @dataclass
+class WalletSnapshot(_Record):
+    """Balances of one Bittensor coldkey at one moment, in TAO."""
+    address: str
+    label: Optional[str] = None
+    rank: Optional[int] = None              # taostats leaderboard rank
+    balance_free: Optional[float] = None
+    balance_staked: Optional[float] = None
+    balance_staked_root: Optional[float] = None
+    balance_staked_alpha: Optional[float] = None   # alpha valued in TAO
+    balance_total: Optional[float] = None
+    balance_total_24h_ago: Optional[float] = None
+    rewards_per_day: Optional[float] = None  # mining + validating, in TAO
+    subnets: Optional[str] = None            # netuids it earns on, "8,64"
+    positions_complete: Optional[bool] = None
+    swapped_to: Optional[str] = None         # new coldkey after a swap
+    block_number: Optional[int] = None
+    snapshot_at: Optional[str] = None       # chain time of the balances
+    source: Optional[str] = None            # scan, track
+    source_url: Optional[str] = None
+    fetched_at: str = field(default_factory=utcnow)
+
+
+@dataclass
+class WalletPosition(_Record):
+    """A wallet's stake in one subnet (via one hotkey), now and 24h ago.
+    Diffs between runs show when a wallet moved into or out of a subnet."""
+    address: str
+    netuid: int
+    hotkey: Optional[str] = None
+    alpha: Optional[float] = None
+    alpha_as_tao: Optional[float] = None
+    alpha_24h_ago: Optional[float] = None
+    alpha_as_tao_24h_ago: Optional[float] = None
+    snapshot_at: Optional[str] = None
+    fetched_at: str = field(default_factory=utcnow)
+
+
+@dataclass
 class GridCell(_Record):
     """Rank of a target business at one grid point."""
     keyword: str

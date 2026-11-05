@@ -7,6 +7,12 @@
     tao report                        # data/tao_report.html
     tao init --netuids 1,8,19         # seo/config/tao.json
     tao export --format csv
+
+Wallets (from taostats.io subnet metagraph and account pages):
+    tao wallets --subnets 8 --top 20  # rank the biggest earners
+    tao follow <address> --label x    # watchlist; also `tao unfollow`
+    tao following                     # watchlist with gains since follow
+    tao track --threshold 5           # refresh followed wallets, warn
 """
 import argparse
 import html
@@ -19,6 +25,7 @@ import seo
 from seo import cli as seo_cli
 from seo import storage
 from seo.models import ChallengeError, MissingDependency, utcnow
+from seo import tao_wallets
 from seo.sources import taostats
 
 DEFAULT_DB = os.path.join("data", "tao.sqlite")
@@ -321,11 +328,13 @@ def build_parser():
     p.add_argument("--chrome-binary", default=os.environ.get("SEO_CHROME"))
     p.add_argument("--headless", action="store_true")
     p.add_argument("--proxy")
+    tao_wallets.add_delay(p, os.environ.get("TAO_DELAY") or None)
     p.add_argument("--version", action="version",
                    version="tao %s" % seo.__version__)
     sub = p.add_subparsers(dest="command", required=True)
 
     sp = sub.add_parser("subnets", help="fetch the subnet table")
+    tao_wallets.add_delay(sp)
     sp.add_argument("--headless", action="store_true",
                     default=argparse.SUPPRESS,
                     help="same as the global --headless")
@@ -340,6 +349,7 @@ def build_parser():
     sp.set_defaults(func=cmd_subnet)
 
     sp = sub.add_parser("watch", help="fetch and warn about big moves")
+    tao_wallets.add_delay(sp)
     sp.add_argument("--headless", action="store_true",
                     default=argparse.SUPPRESS,
                     help="same as the global --headless")
@@ -373,10 +383,18 @@ def build_parser():
     sp.add_argument("--dir", default="data")
     sp.add_argument("--format", choices=("csv", "json"), default="csv")
     sp.set_defaults(func=cmd_export)
+
+    tao_wallets.add_parsers(sub)
+    from seo import tao_collect
+    tao_collect.add_parser(sub)
     return p
 
 
 def main(argv=None):
+    if (sys.platform == "win32" and hasattr(sys.stdout, "reconfigure")
+            and not sys.stdout.isatty() and not os.environ.get(
+                "PYTHONIOENCODING")):
+        sys.stdout.reconfigure(encoding="utf-8")
     args = build_parser().parse_args(argv)
     store = storage.Storage(args.db)
     try:

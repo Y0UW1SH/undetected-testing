@@ -1,8 +1,7 @@
 """SQLite persistence plus CSV / JSON export.
 
-One table per record type. Tables are created on first use from the
-dataclass fields, so adding a field to a model only needs the existing
-database file to be deleted or the column added by hand."""
+One table per record type. Wallet tables add missing columns when opening
+a database created by an earlier version."""
 import csv
 import json
 import os
@@ -23,6 +22,8 @@ TABLES = {
     "listings": models.Listing,
     "reddit_posts": models.RedditPost,
     "subnet_stats": models.SubnetStat,
+    "wallet_snapshots": models.WalletSnapshot,
+    "wallet_positions": models.WalletPosition,
 }
 
 
@@ -57,10 +58,22 @@ class Storage:
                 "CREATE TABLE IF NOT EXISTS %s (id INTEGER PRIMARY KEY, %s)"
                 % (table, cols)
             )
+            if table in ("wallet_snapshots", "wallet_positions"):
+                existing = {r[1] for r in cur.execute(
+                    "PRAGMA table_info(%s)" % table)}
+                for field in model.__dataclass_fields__.values():
+                    if field.name not in existing:
+                        cur.execute("ALTER TABLE %s ADD COLUMN %s %s" % (
+                            table, field.name, _sql_type(field.type)))
         cur.execute(
             "CREATE TABLE IF NOT EXISTS geocode_cache "
             "(place TEXT PRIMARY KEY, lat REAL, lng REAL, display TEXT, "
             "canonical TEXT)"
+        )
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS followed_wallets "
+            "(address TEXT PRIMARY KEY, label TEXT, followed_at TEXT, "
+            "balance_at_follow REAL)"
         )
         self.conn.commit()
 
@@ -142,6 +155,36 @@ class Storage:
         )
         self.conn.commit()
 
+    # ---- followed wallets ----------------------------------------------
+    def follow(self, address, label=None, balance=None, when=None):
+        """Add or relabel a wallet. Re-following keeps the original
+        follow date and starting balance. Returns True if new."""
+        row = self.conn.execute(
+            "SELECT address FROM followed_wallets WHERE address = ?",
+            (address,)).fetchone()
+        if row is not None:
+            if label is not None:
+                self.conn.execute(
+                    "UPDATE followed_wallets SET label = ? WHERE address = ?",
+                    (label, address))
+                self.conn.commit()
+            return False
+        self.conn.execute(
+            "INSERT INTO followed_wallets VALUES (?, ?, ?, ?)",
+            (address, label, when or models.utcnow(), balance))
+        self.conn.commit()
+        return True
+
+    def unfollow(self, address):
+        cur = self.conn.execute(
+            "DELETE FROM followed_wallets WHERE address = ?", (address,))
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def followed(self):
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM followed_wallets ORDER BY followed_at, address")]
+
     # ---- export --------------------------------------------------------
     def export(self, table, directory="data", fmt="csv"):
         rows = self.rows(table)
@@ -153,7 +196,8 @@ class Storage:
         else:
             cols = ["id"] + TABLES[table].columns()
             with open(path, "w", newline="", encoding="utf-8") as fh:
-                writer = csv.DictWriter(fh, fieldnames=cols)
+                writer = csv.DictWriter(fh, fieldnames=cols,
+                                        extrasaction="ignore")
                 writer.writeheader()
                 writer.writerows(rows)
         return path

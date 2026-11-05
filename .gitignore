@@ -168,3 +168,5 @@ seo/config/keywords.json
 
 # Test/CLI export output when run from the repo root
 out/
+try_tao_out/
+github_out/

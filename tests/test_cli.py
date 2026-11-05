@@ -155,7 +155,8 @@ def test_canary_and_export_commands(fake_env):
     assert sorted(os.listdir("out")) == [
         "businesses.json", "canary_runs.json", "grid_cells.json",
         "listings.json", "local_pack.json", "nap_records.json",
-        "reddit_posts.json", "serp_results.json", "subnet_stats.json"]
+        "reddit_posts.json", "serp_results.json", "subnet_stats.json",
+        "wallet_positions.json", "wallet_snapshots.json"]
 
 
 def test_local_details_merges_place_page(fake_env):

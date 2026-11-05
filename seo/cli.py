@@ -69,10 +69,13 @@ def _chrome_kwargs(args):
 
 
 def _session(args, geoloc=None):
+    kwargs = _chrome_kwargs(args)
+    pauses = getattr(args, "pauses", None)     # (min, max) seconds
+    if pauses:
+        kwargs["min_pause"], kwargs["max_pause"] = pauses
     return Session(geoloc=geoloc, mobile=getattr(args, "mobile", False),
                    proxy=getattr(args, "proxy", None),
-                   headless=getattr(args, "headless", False),
-                   **_chrome_kwargs(args))
+                   headless=getattr(args, "headless", False), **kwargs)
 
 
 def _print_json(obj):
