@@ -1,6 +1,43 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-05T06:02:52+00:00",
-  "previous_run": null,
-  "alerts": []
+  "checked_at": "2026-11-05T16:46:35+00:00",
+  "previous_run": "2026-11-05T06:02:52+00:00",
+  "alerts": [
+    {
+      "netuid": 70,
+      "name": "Fugal",
+      "kind": "price_down",
+      "field": "price",
+      "old": 0.011657,
+      "new": 0.009724,
+      "change_pct": -16.58
+    },
+    {
+      "netuid": 70,
+      "name": "Fugal",
+      "kind": "mcap_down",
+      "field": "market cap",
+      "old": 733.78,
+      "new": 641.71,
+      "change_pct": -12.55
+    },
+    {
+      "netuid": 74,
+      "name": "Gittensor",
+      "kind": "price_up",
+      "field": "price",
+      "old": 0.003283,
+      "new": 0.003931,
+      "change_pct": 19.74
+    },
+    {
+      "netuid": 74,
+      "name": "Gittensor",
+      "kind": "mcap_up",
+      "field": "market cap",
+      "old": 16140.0,
+      "new": 19330.0,
+      "change_pct": 19.76
+    }
+  ]
 }
