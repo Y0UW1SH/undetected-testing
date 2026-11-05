@@ -228,9 +228,11 @@ def test_same_run_rerun_publishes_json_sqlite_and_diagnostics_together(
 def test_old_view_with_local_activity_is_rebuilt_as_scan_only(tmp_path):
     path = cached(tmp_path, 88, report(3))
     archive = tmp_path / "88/wallets.html"
-    archive.write_text(tao_view.render(report(3), {"source": "private-feed"}))
+    archive.write_text(tao_view.render(report(3), {"source": "private-feed"}),
+                       encoding="utf8")
     index = tmp_path / "wallet_views.json"
-    index.write_text(json.dumps({"88": [report(3)["checked_at"], "discovery"]}))
+    index.write_text(json.dumps({"88": [report(3)["checked_at"],
+                                        "discovery"]}))
     tao_view.main(["--input", str(path), "--cache", str(tmp_path),
                    "--out", str(tmp_path / "wallets.html")])
     assert "private-feed" not in archive.read_text(encoding="utf8")

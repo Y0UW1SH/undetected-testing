@@ -568,9 +568,14 @@ def _run(args):
                         feed = poll(chain, feed, addresses, args.max_blocks,
                                     notices)
                     else:
+                        if chain is not None:
+                            with suppress(Exception):
+                                chain.close()
+                            chain = None
                         feed = dict(feed, source=SOURCE, status="no_wallets",
                                     checked_at=_now(), addresses=[], events=[],
                                     address_coverage_start={}, rpc_calls=0,
+                                    retained_events=0, lag_blocks=None,
                                     poll_interval_seconds=INTERVAL,
                                     stale_after_seconds=660)
                 except WatchError:

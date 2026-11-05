@@ -232,12 +232,19 @@ def _archive(html, data, source, cache, output_dir=None):
     except (ValueError, OSError):
         rows = {}
     changed = False
-    if run and run.isascii() and run.isdecimal():
+    if run and run.isascii() and run.isdecimal() and source.is_file():
         archive = cache / run / "wallets.html"
+        version = archive.with_name(".wallet-view-source")
+        template = Path(__file__).with_name("wallet_view.html")
+        identity = json.dumps([source.resolve().relative_to(
+            cache.resolve()).as_posix(), source.stat().st_mtime_ns,
+            template.stat().st_mtime_ns])
         info = [data["checked_at"], data.get("mode", "collection")]
         if (rows.get(run) != info or not archive.is_file()
-                or source.stat().st_mtime_ns > archive.stat().st_mtime_ns):
+                or not version.is_file()
+                or version.read_text(encoding="utf8") != identity):
             _write(archive, render(data))
+            _write(version, identity)
             rows[run] = info
             changed = True
     # Two viewers may publish at once. Recover orphaned archived HTML the
