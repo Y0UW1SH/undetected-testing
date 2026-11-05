@@ -326,6 +326,12 @@ def collect(args, store):
     for a in performance["rankings"]["profit"][:args.follow_top]:
         store.follow(a)
     screened = {w["address"] for w in performance["wallets"] if w["screens"]}
+    verified_peers = {
+        w["address"] for w in performance["wallets"] if not w["screens"]
+        and w["coverage"].get("account") == "complete"
+        and (not args.max_balance_tao or w["balance_tao"] is not None)
+        and (not args.max_activity_24h or w["activity_24h_complete"])
+    }
     watched = {r["address"] for r in store.followed()}
     transfers = [e for e in events + inferred if e["kind"] in (
         "stake_transfer", "tao_transfer")]
@@ -334,7 +340,8 @@ def collect(args, store):
                              e["dst"], {}).get("holds_subnets")]
     # Record processed links so explicit unfollows survive a later replay.
     for src, dst in reachable:
-        if src not in watched or not dst or src == dst or dst in screened:
+        if (src not in watched or src in screened or src == dst
+                or dst not in verified_peers):
             continue
         with store.conn:
             new = store.conn.execute(

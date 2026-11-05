@@ -121,7 +121,9 @@ performance, open the collector's `tao_collect.json` report.
   `--follow-top N` adds up to N wallets with a complete current transaction
   tab, zero unpriced sales, positive gross realized TAO, at least two priced
   sales and a win rate above 50%. A receiving address linked by
-  a stake move from a followed wallet can also join the watchlist.
+  a stake move from a followed wallet can also join the watchlist after
+  inspection and balance/activity screening. Pending recipients stay linked
+  in the report without joining the watchlist.
 * Trade timing compares a buy or sale with the first available subnet
   quote 24 to 30 hours later. A subsequent rise counts in favor of a buy,
   and a fall counts in favor of a sale. `evaluated` is the number with a

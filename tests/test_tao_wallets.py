@@ -141,6 +141,12 @@ def test_collect_replay_preserves_transferred_cost(fake_env, monkeypatch):
                         lambda s: ([], "unavailable"), raising=False)
     argv = ["--db", fake_env["db"]]
     tao_cli.main(argv + ["follow", A])
+    assert tao_cli.main(argv + ["collect", "--netuids", "8",
+                                "--new-wallets", "0", "--delay", "0"]) == 0
+    with open("data/tao_collect.json", encoding="utf8") as f:
+        limited = json.load(f)
+    assert B in limited["deferred_recipients"]
+    assert B not in limited["following"]
     for _ in range(2):
         assert tao_cli.main(argv + ["collect", "--netuids", "8",
                                     "--delay", "0"]) == 0
