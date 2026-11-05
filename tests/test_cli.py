@@ -73,6 +73,37 @@ def test_batch_rotates_sessions_within_a_group(fake_env):
         2, 2, 1]
 
 
+def test_batch_skip_retries_remaining_jobs_in_a_new_session(fake_env,
+                                                            monkeypatch):
+    from seo.models import ChallengeError
+    from seo.serp import google
+
+    real_fetch = google.fetch_serp
+
+    def challenged_fetch(session, query, *a, **k):
+        if "pizza" in query:
+            raise ChallengeError("sorry page")
+        return real_fetch(session, query, *a, **k)
+
+    monkeypatch.setattr(google, "fetch_serp", challenged_fetch)
+    write_config({"location": "Austin, TX",
+                  "serp": ["a", "best pizza", "c", "d"]})
+    assert run(fake_env, "batch", "--config", "cfg.json",
+               "--per-session", "4", "--on-challenge", "skip") == 0
+    # session 1: "a" loaded, "pizza" challenged before any page load;
+    # session 2: c, d
+    assert [len(s.fake.visited) for s in RecordingSession.created] == [1, 2]
+    store = storage.Storage(fake_env["db"])
+    done = {r["query"] for r in store.rows("serp_results")}
+    assert done == {"a", "c", "d"}
+    store.close()
+    # default --on-challenge stop: nothing after the challenge runs
+    RecordingSession.created = []
+    assert run(fake_env, "batch", "--config", "cfg.json", "--force",
+               "--per-session", "4") == 0        # 'a' succeeded
+    assert len(RecordingSession.created) == 1
+
+
 def test_batch_grid_without_location_is_an_error_not_a_crash(fake_env,
                                                              capsys):
     write_config({"grid": [{"query": "plumber", "target": "Joe's"}],

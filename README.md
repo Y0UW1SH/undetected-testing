@@ -63,9 +63,10 @@ Needs Python 3.9+ and Google Chrome. On a Linux box without a desktop
 also install `xvfb` and `python3-tk` (or always pass `--headless`).
 
 ```bash
-# 1. install the `seo` command from the latest release tag
+# 1. install the `seo` command (from master, or pin a release tag)
 python -m pip install --upgrade pip wheel setuptools
-pip install "git+https://github.com/Y0UW1SH/undetected-testing@v0.1.0"
+pip install "git+https://github.com/Y0UW1SH/undetected-testing@master"
+# pip install "git+https://github.com/Y0UW1SH/undetected-testing@v0.1.0"
 
 # 2. check the machine: Python, SeleniumBase, Chrome, display, tkinter;
 #    --browser opens the stealth browser once against seleniumbase.io

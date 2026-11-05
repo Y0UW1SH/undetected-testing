@@ -281,7 +281,7 @@ def cmd_batch(args, store):
     """
     with open(args.config, encoding="utf-8") as fh:
         config = json.load(fh)
-    counts = {"done": 0, "skipped": 0, "errors": 0,
+    counts = {"done": 0, "skipped": 0, "errors": 0, "challenged_jobs": 0,
               "challenged_sessions": 0}
     stop = False
     for (loc, device), jobs in _batch_groups(config).items():
@@ -299,13 +299,14 @@ def cmd_batch(args, store):
                                                         device)]
         counts["skipped"] += len(jobs) - len(pending)
         geoloc = (lat, lng) if lat is not None else None
-        for start in range(0, len(pending), args.per_session):
-            batch = pending[start:start + args.per_session]
+        queue = list(pending)
+        while queue and not stop:
+            batch, queue = queue[:args.per_session], queue[args.per_session:]
             try:
                 with Session(geoloc=geoloc, mobile=device == "mobile",
                              proxy=args.proxy, headless=args.headless,
                              **_chrome_kwargs(args)) as s:
-                    for job in batch:
+                    for idx, job in enumerate(batch):
                         print(">>> %s %r @ %s [%s]" % (
                             job["kind"], job["query"], label or "anywhere",
                             device))
@@ -314,6 +315,10 @@ def cmd_batch(args, store):
                                      canonical, label)
                             counts["done"] += 1
                         except ChallengeError:
+                            # Skip this job; give the rest of the batch a
+                            # fresh session (unless --on-challenge stop).
+                            counts["challenged_jobs"] += 1
+                            queue = batch[idx + 1:] + queue
                             raise
                         except Exception as e:
                             counts["errors"] += 1
@@ -327,7 +332,6 @@ def cmd_batch(args, store):
                       file=sys.stderr)
                 if args.on_challenge == "stop":
                     stop = True
-                    break
     _print_json(counts)
     if counts["done"]:
         print("Next: `seo report` writes data/report.html")

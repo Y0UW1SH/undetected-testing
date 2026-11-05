@@ -10,6 +10,7 @@ test-suite in this fork.
 ```bash
 python -m pip install --upgrade pip wheel setuptools
 pip install "git+https://github.com/Y0UW1SH/undetected-testing@v0.1.0"
+# or, without a tag: ...undetected-testing@master
 seo doctor --browser
 ```
 
