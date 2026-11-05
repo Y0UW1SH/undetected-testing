@@ -1,0 +1,14 @@
+id,query,location,device,position,name,rating,reviews,category,address,phone,status,is_ad,fetched_at
+1,emergency plumber,"Austin, TX",desktop,1,We Plumb LLC,4.9,190,Plumber,,(737) 297-5863,3+ years in business · Open 24 hours,0,2026-11-05T17:37:56+00:00
+2,emergency plumber,"Austin, TX",desktop,2,Magic Plumbing ATX,4.9,188,Plumber,,(512) 228-9421,"5+ years in business · Austin, TX · Open 24 hours",0,2026-11-05T17:37:56+00:00
+3,emergency plumber,"Austin, TX",desktop,3,Austin Plumbery,4.8,228,Plumber,,(512) 766-1519,10+ years in business · Open · Closes 6 PM,0,2026-11-05T17:37:56+00:00
+4,emergency plumber,"Austin, TX",desktop,4,Fast Plumbing LLC My Ad Center,4.2,132,Plumber,,(512) 928-0378,20+ years in business · 6200 North Farm to Market Road 973 · Open · Closes 9 PM,1,2026-11-05T17:37:56+00:00
+5,water heater repair austin,"Austin, TX",desktop,1,"L & P Plumbing, LLC My Ad Center",4.8,183,Plumber,,(512) 468-9030,5+ years in business · 644 Canion Street · Open 24 hours,1,2026-11-05T17:38:06+00:00
+6,water heater repair austin,"Austin, TX",desktop,2,"Stan's Heating, Air, Plumbing & Electrical",4.7,6800,,,(512) 200-7614,"(6.8K) · Plumber · 70+ years in business · Austin, TX · Open 24 hours",0,2026-11-05T17:38:06+00:00
+7,water heater repair austin,"Austin, TX",desktop,3,"Radiant Plumbing, Air Conditioning, & Electrical",4.8,18000,,,(512) 690-4935,"(18K) · Plumber · 25+ years in business · Austin, TX · Open 24 hours",0,2026-11-05T17:38:06+00:00
+8,water heater repair austin,"Austin, TX",desktop,4,SALT Plumbing Air & Electric,4.9,1700,,,(737) 355-5063,"(1.7K) · Air conditioning repair service · 40+ years in business · Austin, TX · Open · Closes 8 PM",0,2026-11-05T17:38:06+00:00
+9,plumber near me,"Austin, TX",mobile,1,My Ad Center,4.2,132,,,,,0,2026-11-05T17:42:36+00:00
+10,plumber near me,"Austin, TX",mobile,2,Fast Plumbing LLC My Ad Center,4.2,132,Plumber,,(512) 928-0378,20+ years in business · 6200 North Farm to Market Road 973 · Open · Closes 9 PM,1,2026-11-05T17:42:36+00:00
+11,plumber near me,"Austin, TX",mobile,3,Austin Plumbery,4.8,228,Plumber,,(512) 766-1519,10+ years in business · Open · Closes 6 PM,0,2026-11-05T17:42:36+00:00
+12,plumber near me,"Austin, TX",mobile,4,We Plumb LLC,4.9,190,Plumber,,(737) 297-5863,3+ years in business · Open 24 hours,0,2026-11-05T17:42:36+00:00
+13,plumber near me,"Austin, TX",mobile,5,Mendez Family Plumbing & Electrical,4.9,130,Plumber,,(512) 813-0488,"7+ years in business · Austin, TX · Open · Closes 6 PM",0,2026-11-05T17:42:36+00:00

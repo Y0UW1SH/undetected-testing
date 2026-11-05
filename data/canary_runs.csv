@@ -1,0 +1,6 @@
+id,query,outcome,detail,fetched_at
+1,weather tomorrow,ok,weather tomorrow - Google Search,2026-11-05T17:37:20+00:00
+2,python list comprehension,ok,python list comprehension - Google Search,2026-11-05T17:37:25+00:00
+3,best pizza near me,ok,best pizza near me - Google Search,2026-11-05T17:37:32+00:00
+4,how to tie a tie,ok,how to tie a tie - Google Search,2026-11-05T17:37:39+00:00
+5,convert 5 km to miles,ok,convert 5 km to miles - Google Search,2026-11-05T17:37:46+00:00
