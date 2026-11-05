@@ -165,3 +165,6 @@ now_secure_image.png
 # SEO tool: local database and generated exports (CSV/HTML are committed by CI)
 data/seo.sqlite
 seo/config/keywords.json
+
+# Test/CLI export output when run from the repo root
+out/
