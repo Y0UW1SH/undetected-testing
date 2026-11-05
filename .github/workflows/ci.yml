@@ -74,6 +74,8 @@ jobs:
               raw_gas_records.py --debug
               raw_homedepot.py --debug
 
+          # raw_cdp_mode.py runs here rather than on ARM64, where
+          # bot.sannysoft.com reports one failed fingerprint check.
           - name: social-ubuntu
             os: ubuntu-latest
             scripts: |
@@ -82,8 +84,6 @@ jobs:
               raw_chatgpt.py --debug
               raw_handle_alerts.py --xvfb
               raw_ipify.py
-              # bot.sannysoft.com reports one failed check on ARM64
-              # Chromium, so this runs on x86 where it passes.
               raw_cdp_mode.py --debug
 
           - name: cdp-network-ubuntu
@@ -185,7 +185,7 @@ jobs:
           }
           failed=()
           while IFS= read -r line; do
-            [ -z "$line" ] && continue
+            case "$line" in ""|\#*) continue;; esac   # skip blanks/comments
             echo "::group::python $line"
             if run_one python $line; then
               echo "PASS: $line"
