@@ -167,12 +167,27 @@ jobs:
           pytest verify_sb.py --uc
 
       - name: Run stealth scripts
+        env:
+          SCRIPT_TIMEOUT: "600"
         run: |
+          # Run one script with a hard time limit so a hung browser cannot
+          # consume the whole job (portable: no GNU timeout on macOS).
+          run_one() {
+            python - "$@" <<'PY'
+          import os, subprocess, sys
+          limit = int(os.environ.get("SCRIPT_TIMEOUT", "600"))
+          try:
+              sys.exit(subprocess.run(sys.argv[1:], timeout=limit).returncode)
+          except subprocess.TimeoutExpired:
+              print("TIMEOUT: no result after %ds" % limit)
+              sys.exit(124)
+          PY
+          }
           failed=()
           while IFS= read -r line; do
             [ -z "$line" ] && continue
             echo "::group::python $line"
-            if python $line; then
+            if run_one python $line; then
               echo "PASS: $line"
             else
               echo "FAIL: $line"
