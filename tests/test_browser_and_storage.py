@@ -171,3 +171,26 @@ def test_canary_summary_and_run_with_fake_sessions():
                          session_factory=BrokenSession)
     assert [r.outcome for r in records] == ["error", "skipped", "skipped"]
     assert canary.summarize(records)["attempted"] == 1
+
+
+def test_session_retries_a_transient_browser_start(monkeypatch):
+    import sys
+    import types
+
+    from seo import browser as browser_mod
+
+    calls = {"n": 0}
+
+    def flaky_chrome(**kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("Failed to connect to the browser")
+        return FakeBrowser()
+
+    fake_pkg = types.ModuleType("seleniumbase")
+    fake_pkg.sb_cdp = types.SimpleNamespace(Chrome=flaky_chrome)
+    monkeypatch.setitem(sys.modules, "seleniumbase", fake_pkg)
+    monkeypatch.setattr(browser_mod.time, "sleep", lambda s: None)
+    s = Session().open()
+    assert calls["n"] == 2 and isinstance(s.sb, FakeBrowser)
+    s.close()

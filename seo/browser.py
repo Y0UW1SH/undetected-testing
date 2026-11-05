@@ -92,7 +92,7 @@ class Session:
                 kwargs["headless"] = True
             kwargs.update(self.chrome_kwargs)
             try:
-                self.sb = sb_cdp.Chrome(**kwargs)
+                self.sb = self._start_chrome(sb_cdp, kwargs)
             except SystemExit as e:
                 # SeleniumBase's Xvfb path imports PyAutoGUI, which calls
                 # sys.exit() when tkinter is missing. Turn that into an
@@ -108,6 +108,24 @@ class Session:
                     "--browser`; on Linux without a desktop install xvfb "
                     "or pass --headless." % str(e)[:200]) from e
         return self
+
+    START_ATTEMPTS = 2
+
+    def _start_chrome(self, sb_cdp, kwargs):
+        """Chrome occasionally fails to come up on CI runners ("Failed to
+        connect to the browser"); one retry after a short pause fixes
+        most of those without hiding a real setup problem."""
+        last = None
+        for attempt in range(self.START_ATTEMPTS):
+            try:
+                return sb_cdp.Chrome(**kwargs)
+            except SystemExit:
+                raise
+            except Exception as e:  # noqa: BLE001 - re-raised below
+                last = e
+                if attempt + 1 < self.START_ATTEMPTS:
+                    time.sleep(3.0)
+        raise last
 
     def close(self):
         if self.sb is not None:
