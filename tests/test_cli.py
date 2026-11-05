@@ -1,64 +1,12 @@
 """CLI wiring tests with a fake browser; no Chrome, no network."""
-import json
 import os
 import subprocess
 import sys
 
-import pytest
-
-from seo import canary, cli, geo, storage
-from seo.browser import Session
-from tests.fakes import FakeBrowser, google_router
+from seo import canary, cli, storage
+from tests.fakes import RecordingSession, run, write_config
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
-class RecordingSession(Session):
-    created = []
-
-    def __init__(self, **kw):
-        self.fake = FakeBrowser(router=google_router)
-        kw["browser"] = self.fake
-        kw["min_pause"] = kw["max_pause"] = 0
-        super().__init__(**kw)
-        RecordingSession.created.append(self)
-
-    def set_geolocation(self, lat, lng):
-        self.geoloc = (lat, lng)
-
-    def pause(self, scale=1.0):
-        pass
-
-
-@pytest.fixture
-def fake_env(monkeypatch, tmp_path):
-    RecordingSession.created = []
-    monkeypatch.setattr(cli, "Session", RecordingSession)
-    for module in ("seo.browser", "seo.local.maps", "seo.local.grid"):
-        monkeypatch.setattr(sys.modules[module].time, "sleep",
-                            lambda s: None)
-    calls = []
-
-    def fake_geocode(place, opener=None):
-        calls.append(place)
-        if "paris" in place.lower():
-            return (48.85, 2.35, "Paris, France",
-                    "Paris,Ile-de-France,France")
-        return (30.27, -97.74, "Austin, Texas, US",
-                "Austin,Texas,United States")
-
-    monkeypatch.setattr(geo, "geocode", fake_geocode)
-    monkeypatch.chdir(tmp_path)
-    return {"db": str(tmp_path / "t.sqlite"), "geocode_calls": calls}
-
-
-def run(fake_env, *argv):
-    return cli.main(["--db", fake_env["db"]] + list(argv))
-
-
-def write_config(config):
-    with open("cfg.json", "w") as fh:
-        json.dump(config, fh)
 
 
 def test_resolve_location_uses_geocoder_canonical_and_cache(fake_env):

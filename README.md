@@ -57,6 +57,36 @@ SeleniumBase CDP-mode Chrome with locale, device, proxy and emulated
 geolocation set, dismisses Google's consent dialog, and raises
 `ChallengeError` when Google serves its "unusual traffic" CAPTCHA page.
 
+### Quick start
+
+Needs Python 3.9+ and Google Chrome. On a Linux box without a desktop
+also install `xvfb` and `python3-tk` (or always pass `--headless`).
+
+```bash
+# 1. install the `seo` command from the latest release tag
+python -m pip install --upgrade pip wheel setuptools
+pip install "git+https://github.com/Y0UW1SH/undetected-testing@v0.1.0"
+
+# 2. check the machine: Python, SeleniumBase, Chrome, display, tkinter;
+#    --browser opens the stealth browser once against seleniumbase.io
+seo doctor --browser
+
+# 3. write a config for your business and keywords
+seo init --location "Austin, TX" --serp "emergency plumber" \
+    --local "plumber" --target "Joe's Plumbing"
+
+# 4. run everything in the config, then open the report
+seo batch
+seo report            # -> data/report.html (plus data/grid_*.html heatmaps)
+```
+
+`seo doctor` tells you exactly what to install when something is missing.
+Every command prints what it is doing and ends with the next command to
+run. Results accumulate in `data/seo.sqlite`; `seo report` turns them
+into one HTML page and `seo export` into CSV or JSON.
+
+### Commands
+
 ```bash
 # Google web results for a query as seen from a city (uule + geolocation)
 python -m seo serp "emergency plumber" --location "Austin, TX"
@@ -85,7 +115,16 @@ python -m seo batch --config seo/config/keywords.json --per-session 3
 python -m seo canary --queries 20 --fail-above 50
 
 python -m seo export --format csv     # data/*.csv from data/seo.sqlite
+python -m seo report                  # data/report.html
 ```
+
+Global options: `--db PATH` (or `$SEO_DB`) picks the database;
+`--chrome-binary PATH` (or `$SEO_CHROME`) points at a non-standard
+Chrome; `--version`.
+
+Exit codes: 0 success, 1 nothing succeeded, 2 bad location or missing
+config, 3 Google challenged the session, 4 browser stack not installed
+(run `seo doctor`).
 
 Results are stored in `data/seo.sqlite` (one table per record type) and
 a query is skipped if it was already fetched today unless `--force` is

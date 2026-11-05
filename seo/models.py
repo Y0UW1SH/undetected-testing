@@ -112,3 +112,7 @@ class CanaryRun(_Record):
 
 class ChallengeError(RuntimeError):
     """Google served a CAPTCHA / 'unusual traffic' page."""
+
+
+class MissingDependency(RuntimeError):
+    """SeleniumBase (or Chrome) is not available; see `seo doctor`."""

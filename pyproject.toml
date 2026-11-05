@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "undetected-seo"
+dynamic = ["version"]
+description = "Google SERP and local-SEO scraping on SeleniumBase CDP Mode"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "seleniumbase>=4.54.1",
+    "beautifulsoup4>=4.12",
+]
+
+[project.scripts]
+seo = "seo.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "seo.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["seo*"]
+
+[tool.setuptools.package-data]
+seo = ["config/*.json"]

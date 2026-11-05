@@ -3,11 +3,13 @@
 Wraps `seleniumbase.sb_cdp.Chrome` so that locale, device, proxy, and
 geolocation are set consistently, and adds Google-specific handling for
 the consent dialog and the 'unusual traffic' CAPTCHA page."""
+import os
 import random
+import sys
 import time
 from contextlib import suppress
 
-from seo.models import ChallengeError
+from seo.models import ChallengeError, MissingDependency
 
 CONSENT_BUTTONS = (
     'button#L2AGLb',                       # "Accept all" (EU consent)
@@ -65,8 +67,17 @@ class Session:
     # ---- lifecycle -----------------------------------------------------
     def open(self):
         if self.sb is None:
-            from seleniumbase import sb_cdp
+            try:
+                from seleniumbase import sb_cdp
+            except ImportError as e:
+                raise MissingDependency(
+                    "SeleniumBase is not installed (%s). Run `seo doctor` "
+                    "for the fix." % e) from e
             kwargs = dict(lang=self.lang, ad_block=self.ad_block)
+            if sys.platform.startswith("linux") and hasattr(os, "geteuid") \
+                    and os.geteuid() == 0:
+                # Chrome refuses to start sandboxed as root (Docker, VPS).
+                kwargs["sandbox"] = False
             if self.mobile:
                 kwargs["mobile"] = True
             if self.proxy:
@@ -80,7 +91,22 @@ class Session:
                 # on Linux) unless there is really no display available.
                 kwargs["headless"] = True
             kwargs.update(self.chrome_kwargs)
-            self.sb = sb_cdp.Chrome(**kwargs)
+            try:
+                self.sb = sb_cdp.Chrome(**kwargs)
+            except SystemExit as e:
+                # SeleniumBase's Xvfb path imports PyAutoGUI, which calls
+                # sys.exit() when tkinter is missing. Turn that into an
+                # error the CLI can explain instead of a silent exit 1.
+                raise MissingDependency(
+                    "The browser stack refused to start: %s. On Linux "
+                    "install tkinter (sudo apt-get install -y python3-tk "
+                    "python3-dev) or pass --headless." % str(e)[:200]
+                ) from None
+            except Exception as e:
+                raise MissingDependency(
+                    "Chrome could not be started (%s). Run `seo doctor "
+                    "--browser`; on Linux without a desktop install xvfb "
+                    "or pass --headless." % str(e)[:200]) from e
         return self
 
     def close(self):

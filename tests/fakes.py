@@ -1,5 +1,9 @@
-"""Test doubles standing in for sb_cdp.Chrome."""
+"""Test doubles standing in for sb_cdp.Chrome, plus CLI test helpers."""
+import json
 import os
+
+from seo import cli
+from seo.browser import Session
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -74,3 +78,31 @@ def google_router(url):
     if "google.com/search" in url:
         return ("q - Google Search", load_fixture("google_serp_desktop.html"))
     return ("", "<html></html>")
+
+
+class RecordingSession(Session):
+    """Session wired to a FakeBrowser; remembers every instance."""
+    created = []
+
+    def __init__(self, **kw):
+        self.fake = FakeBrowser(router=google_router)
+        kw["browser"] = self.fake
+        kw["min_pause"] = kw["max_pause"] = 0
+        super().__init__(**kw)
+        RecordingSession.created.append(self)
+
+    def set_geolocation(self, lat, lng):
+        self.geoloc = (lat, lng)
+
+    def pause(self, scale=1.0):
+        pass
+
+
+def run(fake_env, *argv):
+    """Run the CLI against the test database."""
+    return cli.main(["--db", fake_env["db"]] + list(argv))
+
+
+def write_config(config, path="cfg.json"):
+    with open(path, "w") as fh:
+        json.dump(config, fh)

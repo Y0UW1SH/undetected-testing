@@ -1,5 +1,12 @@
-"""Command-line interface.
+"""Command-line interface. Installed as `seo` (or `python -m seo`).
 
+First run:
+    seo doctor --browser          # is Chrome / SeleniumBase / a display OK?
+    seo init --location "Austin, TX" --serp "plumber" --local "plumber"
+    seo batch                     # run everything in the config
+    seo report                    # data/report.html
+
+Single commands:
     python -m seo serp "emergency plumber" --location "Austin, TX"
     python -m seo local "plumber" --location "Austin, TX" --details
     python -m seo grid "plumber" --target "Joe's Plumbing" \\
@@ -14,14 +21,21 @@
 """
 import argparse
 import json
+import os
+import shutil
 import sys
 
-from seo import canary, geo, storage
+import seo
+from seo import canary, doctor, geo, report, storage
 from seo.browser import Session
 from seo.local import grid as grid_mod
 from seo.local import maps, nap
-from seo.models import ChallengeError, utcnow
+from seo.models import ChallengeError, MissingDependency, utcnow
 from seo.serp import google
+
+DEFAULT_CONFIG = os.path.join("seo", "config", "keywords.json")
+EXAMPLE_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "config", "keywords.example.json")
 
 
 def _resolve_location(store, text, lat=None, lng=None):
@@ -36,17 +50,28 @@ def _resolve_location(store, text, lat=None, lng=None):
         return None, None, None, ""
     cached = store.cached_geocode(text)
     if cached is None:
-        g_lat, g_lng, display, canonical = geo.geocode(text)
+        try:
+            g_lat, g_lng, display, canonical = geo.geocode(text)
+        except Exception as e:
+            raise LookupError(
+                "Could not geocode %r (%s). Check the spelling, or pass "
+                "--lat and --lng instead." % (text, str(e)[:120])) from e
         store.cache_geocode(text, g_lat, g_lng, display, canonical)
     else:
         g_lat, g_lng, display, canonical = cached
     return g_lat, g_lng, canonical, text
 
 
+def _chrome_kwargs(args):
+    binary = getattr(args, "chrome_binary", None)
+    return {"browser_executable_path": binary} if binary else {}
+
+
 def _session(args, geoloc=None):
     return Session(geoloc=geoloc, mobile=getattr(args, "mobile", False),
                    proxy=getattr(args, "proxy", None),
-                   headless=getattr(args, "headless", False))
+                   headless=getattr(args, "headless", False),
+                   **_chrome_kwargs(args))
 
 
 def _print_json(obj):
@@ -278,7 +303,8 @@ def cmd_batch(args, store):
             batch = pending[start:start + args.per_session]
             try:
                 with Session(geoloc=geoloc, mobile=device == "mobile",
-                             proxy=args.proxy, headless=args.headless) as s:
+                             proxy=args.proxy, headless=args.headless,
+                             **_chrome_kwargs(args)) as s:
                     for job in batch:
                         print(">>> %s %r @ %s [%s]" % (
                             job["kind"], job["query"], label or "anywhere",
@@ -304,6 +330,7 @@ def cmd_batch(args, store):
                     break
     _print_json(counts)
     if counts["done"]:
+        print("Next: `seo report` writes data/report.html")
         return 0
     if counts["challenged_sessions"]:
         return 3
@@ -331,13 +358,103 @@ def cmd_capture(args, store):
     return 0
 
 
+def cmd_doctor(args, store):
+    results = doctor.checks(args.config, os.path.dirname(store.path) or ".")
+    if args.network:
+        results.append(doctor.geocoder_check())
+    if args.browser:
+        results.append(doctor.browser_check(
+            Session, headless=args.headless, min_pause=0.2, max_pause=0.4,
+            **_chrome_kwargs(args)))
+    print(doctor.render(results))
+    failed = [r for r in results if r["status"] == doctor.FAIL]
+    if failed:
+        print("\n%d check(s) failed." % len(failed))
+        return 1
+    print("\nAll required checks passed.")
+    return 0
+
+
+def cmd_init(args, store):
+    """Write a config file. With no keyword arguments, copy the example."""
+    path = args.config
+    if os.path.exists(path) and not args.force:
+        print("%s already exists (use --force to overwrite)." % path)
+        return 1
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    if not (args.serp or args.local or args.target):
+        shutil.copyfile(EXAMPLE_CONFIG, path)
+        print("Copied the example config to %s. Edit the location and "
+              "keywords, then run `seo batch`." % path)
+        return 0
+    block = {"location": args.location, "device": args.device}
+    if args.serp:
+        block["serp"] = args.serp
+    if args.local:
+        block["local"] = args.local
+    if args.target:
+        grid_query = args.local[0] if args.local else (
+            args.serp[0] if args.serp else args.target)
+        block["grid"] = [{"query": grid_query, "target": args.target,
+                          "size": args.grid_size,
+                          "spacing_km": args.grid_spacing}]
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump([block], fh, indent=2)
+        fh.write("\n")
+    print("Wrote %s:" % path)
+    print(json.dumps([block], indent=2))
+    print("\nNext: `seo batch` (then `seo report`).")
+    return 0
+
+
+def cmd_report(args, store):
+    path = report.write(store, args.out)
+    print("Report written to %s" % os.path.abspath(path))
+    return 0
+
+
 # ---- parser -----------------------------------------------------------------
 def build_parser():
     p = argparse.ArgumentParser(
         prog="seo", description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--db", default=storage.DEFAULT_DB)
+    p.add_argument("--db", default=os.environ.get("SEO_DB",
+                                                  storage.DEFAULT_DB),
+                   help="SQLite file (default data/seo.sqlite or $SEO_DB)")
+    p.add_argument("--chrome-binary", default=os.environ.get("SEO_CHROME"),
+                   help="path to a Chrome/Chromium binary ($SEO_CHROME)")
+    p.add_argument("--version", action="version",
+                   version="seo %s" % seo.__version__)
     sub = p.add_subparsers(dest="command", required=True)
+
+    sp = sub.add_parser("doctor", help="check Python, Chrome, display, "
+                                       "config; --browser opens Chrome")
+    sp.add_argument("--config", default=DEFAULT_CONFIG)
+    sp.add_argument("--browser", action="store_true",
+                    help="also launch the stealth browser once")
+    sp.add_argument("--network", action="store_true",
+                    help="also test the geocoder")
+    sp.add_argument("--headless", action="store_true")
+    sp.set_defaults(func=cmd_doctor)
+
+    sp = sub.add_parser("init", help="write a keywords config file")
+    sp.add_argument("--config", default=DEFAULT_CONFIG)
+    sp.add_argument("--location", default="", help='e.g. "Austin, TX"')
+    sp.add_argument("--device", choices=("desktop", "mobile"),
+                    default="desktop")
+    sp.add_argument("--serp", action="append", default=[],
+                    metavar="KEYWORD", help="web-search keyword (repeat)")
+    sp.add_argument("--local", action="append", default=[],
+                    metavar="KEYWORD", help="Maps keyword (repeat)")
+    sp.add_argument("--target", help="your business name for a rank grid")
+    sp.add_argument("--grid-size", type=int, default=5)
+    sp.add_argument("--grid-spacing", type=float, default=1.0)
+    sp.add_argument("--force", action="store_true")
+    sp.set_defaults(func=cmd_init)
+
+    sp = sub.add_parser("report", help="write an HTML report from the db")
+    sp.add_argument("--out", default=os.path.join("data", "report.html"))
+    sp.set_defaults(func=cmd_report)
 
     def loc_args(sp):
         sp.add_argument("--location", default="",
@@ -399,7 +516,7 @@ def build_parser():
     sp.set_defaults(func=cmd_canary)
 
     sp = sub.add_parser("batch", help="run all jobs from a JSON config")
-    sp.add_argument("--config", default="seo/config/keywords.json")
+    sp.add_argument("--config", default=DEFAULT_CONFIG)
     sp.add_argument("--per-session", type=int, default=5,
                     help="new browser every N jobs")
     sp.add_argument("--max", type=int, default=20)
@@ -428,6 +545,11 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    if args.command == "batch" and not os.path.exists(args.config):
+        print("No config at %s. Create one with:\n  seo init --location "
+              "\"Austin, TX\" --serp \"plumber\" --local \"plumber\""
+              % args.config, file=sys.stderr)
+        return 2
     store = storage.Storage(args.db)
     try:
         return args.func(args, store)
@@ -436,6 +558,15 @@ def main(argv=None):
         print("Stop this job; the runner IP is flagged. Retry later or "
               "from another IP.", file=sys.stderr)
         return 3
+    except MissingDependency as e:
+        print("SETUP PROBLEM: %s" % e, file=sys.stderr)
+        return 4
+    except LookupError as e:
+        print("LOCATION PROBLEM: %s" % e, file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        return 130
     finally:
         store.close()
 

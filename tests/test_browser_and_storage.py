@@ -36,6 +36,37 @@ def test_session_raises_on_persistent_challenge(fixture):
     assert fake.quit_called
 
 
+def test_session_turns_sys_exit_into_setup_error(monkeypatch):
+    import sys
+    import types
+
+    from seo.models import MissingDependency
+
+    def chrome(**kw):
+        raise SystemExit("NOTE: You must install tkinter on Linux")
+
+    fake_pkg = types.ModuleType("seleniumbase")
+    fake_pkg.sb_cdp = types.SimpleNamespace(Chrome=chrome)
+    monkeypatch.setitem(sys.modules, "seleniumbase", fake_pkg)
+    try:
+        Session().open()
+    except MissingDependency as e:
+        assert "python3-tk" in str(e) and "--headless" in str(e)
+    else:
+        raise AssertionError("expected MissingDependency")
+
+    def boom(**kw):
+        raise RuntimeError("no display")
+
+    fake_pkg.sb_cdp = types.SimpleNamespace(Chrome=boom)
+    try:
+        Session().open()
+    except MissingDependency as e:
+        assert "no display" in str(e)
+    else:
+        raise AssertionError("expected MissingDependency")
+
+
 def test_session_passes_clean_page():
     fake = FakeBrowser({"https://www.google.com/search?q=x": (
         "x - Google Search", "<html>results</html>")})
