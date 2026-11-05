@@ -181,3 +181,28 @@ def test_stalled_widget_records_one_visible_failure(tmp_path, monkeypatch):
     s = Stalled([])
     _, status = history.fetch_history(s, WALLET, "transactions", 1)
     assert status == "unavailable" and s.clicks == 1 and len(s.pictures) == 1
+
+
+def test_uses_taostats_checkbox_even_when_grid_has_spacer(monkeypatch):
+    monkeypatch.setattr(history.time, "sleep", lambda _: None)
+
+    class GridWithWidget(Table):
+        target = None
+
+        def evaluate(self, js):
+            if self.target:
+                return page([trade(140)], 1, 1)
+            return {"status": "pending", "diagnostic": {
+                "widget_present": True, "widget_completed": False,
+                "taostats_control_visible": True}}
+
+        def click_with_offset(self, selector, x, y, scroll=True):
+            self.target = (selector, x, y, scroll)
+
+        def gui_click_captcha(self):
+            raise AssertionError("generic helper matches the grid spacer")
+
+    session = GridWithWidget([])
+    rows, status = history.fetch_history(session, WALLET, "transactions", 1)
+    assert status == "complete" and len(rows) == 1
+    assert session.target == ("#cf-turnstile", 20, 32, False)

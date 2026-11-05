@@ -28,12 +28,18 @@ TABLE_QUERY = """
   const reply = document.querySelector('[name="cf-turnstile-response"]');
   const host = reply?.parentElement || widget;
   const rect = host?.getBoundingClientRect();
+  const control = document.querySelector('#cf-turnstile');
+  const box = control?.getBoundingClientRect();
+  const hit = box && document.elementFromPoint(box.left + 20, box.top + 32);
+  const visible = !!(box && box.width >= 200 && box.height >= 50
+                     && control.contains(hit));
   const diagnostic = {
     grid_present: !!root,
     rendered_cells: root?.querySelectorAll('[role=gridcell]').length || 0,
     widget_present: !!widget, widget_completed: !!reply?.value,
     widget_host_size: rect ? [Math.round(rect.width),
                               Math.round(rect.height)] : null,
+    taostats_control_visible: visible,
     page_ready: document.readyState, query_found: false,
     active_table_queries: 0,
   };
@@ -53,7 +59,17 @@ TABLE_QUERY = """
           && !p.netuid && !p.action && !p.amount_min && !p.amountMin;
       });
       if (!query) continue;
+      const failure = String(query.state.error?.message || '');
+      const categories = [
+        [/turnstile|captcha|challenge|verif/i, 'verification'],
+        [/timeout|timed out/i, 'timeout'],
+        [/rate limit|429/i, 'rate_limit'],
+        [/auth|forbidden|403|401/i, 'authorization'],
+        [/fetch|network|connect/i, 'network'],
+      ];
       Object.assign(diagnostic, {
+        failure_category: categories.find(([match]) =>
+          match.test(failure))?.[1] || null,
         query_found: true, query_status: query.state.status,
         fetch_status: query.state.fetchStatus,
         failed_attempts: query.state.fetchFailureCount,
@@ -220,7 +236,12 @@ def _read_pages(session, name, address, tab, pages, window=None):
             # once, only after the page has had time to finish on its own.
             try:
                 gui = getattr(session.sb, "gui_click_captcha", None)
-                if gui and not getattr(session, "headless", False):
+                if diag.get("taostats_control_visible"):
+                    # The generic helper otherwise matches AG Grid's spacer.
+                    session.sb.click_with_offset("#cf-turnstile", 20, 32,
+                                                 scroll=False)
+                    attempt = "taostats_control_attempted"
+                elif gui and not getattr(session, "headless", False):
                     gui()
                     attempt = "desktop_control_attempted"
                 else:
@@ -232,7 +253,7 @@ def _read_pages(session, name, address, tab, pages, window=None):
             diag = state.get("diagnostic", {})
             diag["verification_control"] = attempt
             folder = os.environ.get("TAO_DIAGNOSTIC_DIR")
-            if folder and state.get("status") == "pending":
+            if folder and state.get("status") != "success":
                 path = Path(folder) / "wallet-verification.png"
                 with suppress(OSError, RuntimeError):
                     if not path.exists():
