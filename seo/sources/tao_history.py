@@ -5,8 +5,11 @@ full addresses and integer amounts which the grid shortens for display.
 """
 import json
 import math
+import os
 import re
 import time
+from contextlib import suppress
+from pathlib import Path
 from datetime import datetime, timezone
 
 from seo.sources.taostats_wallets import BASE, account_url, _ss58, rao_to_tao
@@ -216,13 +219,25 @@ def _read_pages(session, name, address, tab, pages, window=None):
             # Use the browser session's existing normal verification control
             # once, only after the page has had time to finish on its own.
             try:
-                session.sb.solve_captcha()
-                attempt = "attempted"
+                gui = getattr(session.sb, "gui_click_captcha", None)
+                if gui and not getattr(session, "headless", False):
+                    gui()
+                    attempt = "desktop_control_attempted"
+                else:
+                    session.sb.solve_captcha()
+                    attempt = "browser_control_attempted"
             except Exception:
                 attempt = "helper_error"
             state = _wait_table(session, js)
             diag = state.get("diagnostic", {})
             diag["verification_control"] = attempt
+            folder = os.environ.get("TAO_DIAGNOSTIC_DIR")
+            if folder and state.get("status") == "pending":
+                path = Path(folder) / "wallet-verification.png"
+                with suppress(OSError, RuntimeError):
+                    if not path.exists():
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        session.sb.save_screenshot(str(path))
         if window is not None:
             window["diagnostic"] = diag
         result = (state.get("data")

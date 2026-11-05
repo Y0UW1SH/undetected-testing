@@ -93,6 +93,7 @@ jobs:
           fi
           echo "TAO_DB=$state/wallets.sqlite" >> "$env_file"
           echo "REPORT=$report" >> "$env_file"
+          echo "TAO_DIAGNOSTIC_DIR=$temp_dir/tao-wallet-report" >> "$env_file"
 
       - uses: actions/setup-python@v6
         with:
@@ -244,6 +245,7 @@ jobs:
           path: |
             ${{ env.TAO_DB }}
             ${{ env.REPORT }}
+            ${{ env.TAO_DIAGNOSTIC_DIR }}/wallet-verification.png
           if-no-files-found: warn
           retention-days: 3
 

@@ -184,6 +184,8 @@ and `1` for **history_pages**, or run:
 gh workflow run tao-collect.yml --ref master -f netuids=8 -f top=2 -f history_pages=1 -f delay=2-4
 ```
 
+If the wallet verification widget stays pending, the artifact can include
+one screenshot of the public page and its query state in the JSON.
 The run summary shows tab coverage, rows read, up to ten traders by gross
 realized TAO, and up to five recent transfers with the evidence for each
 move. It shows priced and unpriced sales separately. Download

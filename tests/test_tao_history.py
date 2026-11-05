@@ -154,3 +154,30 @@ def test_waits_once_for_active_verification_control(monkeypatch):
     rows, status = history.fetch_history(session, WALLET, "transactions", 1)
     assert status == "complete" and len(rows) == 1
     assert session.attempts == 1
+
+
+def test_stalled_widget_records_one_visible_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(history.time, "sleep", lambda _: None)
+    monkeypatch.setenv("TAO_DIAGNOSTIC_DIR", str(tmp_path))
+
+    class Stalled(Table):
+        pictures = []
+        clicks = 0
+
+        def evaluate(self, js):
+            if js == history.RESOURCE_STATE:
+                return {"table_requests": 0}
+            return {"status": "pending", "diagnostic": {
+                "widget_present": True, "widget_completed": False}}
+
+        def gui_click_captcha(self):
+            self.clicks += 1
+
+        def save_screenshot(self, path):
+            from pathlib import Path
+            self.pictures.append(path)
+            Path(path).touch()
+
+    s = Stalled([])
+    _, status = history.fetch_history(s, WALLET, "transactions", 1)
+    assert status == "unavailable" and s.clicks == 1 and len(s.pictures) == 1
