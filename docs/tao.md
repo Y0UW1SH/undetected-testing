@@ -97,6 +97,14 @@ performance, open the collector's `tao_collect.json` report.
   score. A missing buy price is shown as null. A watched wallet's native
   TAO transfer can prompt a check for subnet holdings at the destination.
   Only transfers of stake carry the subnet position's original basis.
+  For a transfer with a recorded extrinsic, the summary's evidence link
+  opens its transaction on Finney, Bittensor's native mainnet. For
+  example, transfer `9441573-0003` appears in block 9441573 at extrinsic
+  index 3. Snapshot matches show their confidence score instead.
+  [View the native transfer](https://taostats.io/extrinsic/9441573-0003)
+  and [browse native blocks](https://taostats.io/blocks).
+  Taostats also has a separate [EVM block explorer](https://taostats.io/evm/blocks)
+  for Ethereum-compatible transactions.
 * `traders` lists wallets with costed sales, ordered by observed realized
   TAO before separate fees. The win rate uses only priced sales. See `unpriced_sales` for the
   number omitted, and check how many sales and accounts contributed.
@@ -126,11 +134,14 @@ and `1` for **history_pages**, or run:
 gh workflow run tao-collect.yml --ref master -f netuids=8 -f top=2 -f history_pages=1 -f delay=2-4
 ```
 
-The run summary shows tab coverage, rows read and cumulative priced and
-unpriced sales. Download **wallet-collection** for the JSON report and
+The run summary shows tab coverage, rows read, up to ten traders by gross
+realized TAO, and up to five recent transfers with the evidence for each
+move. It shows priced and unpriced sales separately. Download
+**wallet-collection** for the JSON report and
 SQLite database. This workflow runs manually on standard `ubuntu-latest`,
-has a 90-minute time limit, and keeps downloadable artifacts for three
-days. It saves wallet history to `wallets.sqlite` on the dedicated
+with headed Chrome on a 1366×768 Xvfb virtual display. It has a 90-minute
+time limit and keeps downloadable artifacts for three days. It saves
+wallet history to `wallets.sqlite` on the dedicated
 `tao-wallet-data` branch so it can be restored after artifact expiry.
 The repository must allow Actions to write that branch. This repository
 is public, so the followed addresses and saved results are public too.

@@ -91,7 +91,7 @@ def normalize(raw, tab, address):
     if not when or not extrinsic:
         return None
     amount = _quantity(raw.get("amount"))
-    alpha = netuid = None
+    alpha = netuid = side = None
     if tab == "transfers":
         src, dst = _ss58(raw.get("from")), _ss58(raw.get("to"))
         if not src or not dst or address not in (src, dst) or amount is None:
@@ -113,6 +113,7 @@ def normalize(raw, tab, address):
         src, dst = (None, owner) if incoming else (owner, None)
         if raw.get("is_transfer"):
             kind = "stake_transfer"
+            side = "in" if incoming else "out"
             src, dst = (peer, owner) if incoming else (owner, peer)
         else:
             kind = "buy" if incoming else "sell"
@@ -128,8 +129,7 @@ def normalize(raw, tab, address):
     return dict(id=json.dumps(key, separators=(",", ":")), time=when,
                 extrinsic=extrinsic, event_index=_index(raw), owner=address,
                 kind=kind, src=src, dst=dst, alpha=alpha, tao=amount,
-                netuid=netuid,
-                evidence="transaction")
+                netuid=netuid, transfer_side=side, evidence="transaction")
 
 
 def fetch_history(session, address, tab, pages):

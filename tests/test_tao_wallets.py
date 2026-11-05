@@ -94,6 +94,7 @@ def test_collect_reads_each_wallet_once_and_reports_unavailable_history(
                                 "--delay", "0"]) == 0
     browsers = fakes.RecordingSession.created
     assert len(browsers) == 1
+    assert browsers[0].ad_block is False
     assert browsers[0].fake.visited.count(site.account_url(A)) == 1
     with open("data/tao_collect.json", encoding="utf8") as f:
         report = json.load(f)

@@ -103,18 +103,27 @@ jobs:
             for address in "${addresses[@]}"; do args+=(--address "$address"); done
           fi
           if [[ -n "$TAO_PROXY" ]]; then args+=(--proxy "$TAO_PROXY"); fi
-          python -m seo.tao_cli --db "$TAO_DB" "${args[@]}"
+          command -v Xvfb xauth xvfb-run google-chrome >/dev/null
+          xvfb-run -a -s "-screen 0 1366x768x24" python -m seo.tao_cli --db "$TAO_DB" "${args[@]}"
 
       - name: Summarize coverage and trading results
         shell: python
         run: |
           import json
           import os
+          import re
           from collections import Counter
           from pathlib import Path
 
           report = json.loads(Path(os.environ["REPORT"]).read_text())
           coverage = report["coverage"].values()
+
+          def account(address):
+              if not address or not re.fullmatch(r"[A-Za-z0-9]+", address):
+                  return "Unknown"
+              label = f"{address[:6]}…{address[-4:]}"
+              return f"[{label}](https://taostats.io/account/{address})"
+
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
               print("## Wallet collection", file=out)
               print(f"Scanned {len(report['metagraph_neurons'])} metagraphs "
@@ -130,8 +139,40 @@ jobs:
                         f"{status['unavailable']} | {status['skipped']} | {rows} |", file=out)
               priced = sum(t["priced_sales"] for t in report["traders"])
               unpriced = sum(report["unpriced_sales"].values())
-              print(f"\nStored history contains {priced} priced sales across "
-                    f"{len(report['traders'])} wallets and {unpriced} unpriced sales.", file=out)
+              if priced:
+                  print(f"\nStored history includes {priced} priced sales and "
+                        f"{unpriced} unpriced sales.", file=out)
+                  print("\n### Traders by gross realized P/L\n", file=out)
+                  print("| Wallet | Gross P/L (TAO) | Wins / priced sales | Unpriced sales | "
+                        "Favorable / evaluated trades at 24h |", file=out)
+                  print("| --- | ---: | ---: | ---: | ---: |", file=out)
+                  for trader in report["traders"][:10]:
+                      t = trader["timing"]
+                      print(f"| {account(trader['address'])} | {trader['realized_tao']:+.6g} | "
+                            f"{trader['wins']} / {trader['priced_sales']} | {trader['unpriced_sales']} | "
+                            f"{t['favorable']} / {t['evaluated']} |", file=out)
+              else:
+                  print(f"\nNo priced sales in stored history. Unpriced sales: {unpriced}.", file=out)
+
+              transfers = sorted(report["transfers"], key=lambda e: e["time"], reverse=True)[:5]
+              if transfers:
+                  print("\n### Recent transfers\n", file=out)
+                  print("| Time (UTC) | From | To | Asset | Quantity | Evidence |", file=out)
+                  print("| --- | --- | --- | --- | ---: | --- |", file=out)
+                  for e in transfers:
+                      stake = e["kind"] == "stake_transfer"
+                      asset = f"SN{e['netuid']} alpha" if stake else "TAO"
+                      quantity = e["alpha"] if stake else e["tao"]
+                      label = {"transaction": "Transaction", "coldkey_swap": "Coldkey swap",
+                               "snapshot_match": "Snapshot match"}.get(e["evidence"], "Unknown")
+                      extrinsic = e.get("extrinsic")
+                      if e["evidence"] == "transaction" and re.fullmatch(r"[0-9]+-[0-9]+", str(extrinsic)):
+                          label = f"[{extrinsic}](https://taostats.io/extrinsic/{extrinsic}?network=finney)"
+                      if e["evidence"] == "snapshot_match":
+                          label += f" (score {e['confidence']:.2f})"
+                      when = e["time"][:19].replace("T", " ")
+                      print(f"| {when} | {account(e['src'])} | {account(e['dst'])} | "
+                            f"{asset} | {quantity:.9g} | {label} |", file=out)
 
       - name: Save wallet history
         shell: bash

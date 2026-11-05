@@ -94,6 +94,9 @@ def test_raw_tao_transfers_are_distinct_from_subnet_movements():
     stake = dict(trade(140), action="UNDELEGATE", is_transfer=True,
                  transfer_address={"ss58": PEER})
     event = history.normalize(stake, "transactions", WALLET)
+    assert event["transfer_side"] == "out"
+    assert history.normalize(dict(stake, action="DELEGATE"), "transactions",
+                             WALLET)["transfer_side"] == "in"
     assert (event["kind"], event["src"], event["dst"], event["netuid"]) == (
         "stake_transfer", WALLET, PEER, 68)
 

@@ -63,7 +63,9 @@ def _read(store):
 
 
 def _save_events(db, events):
-    db.executemany("INSERT OR IGNORE INTO wallet_events VALUES (?,?)",
+    db.executemany("INSERT INTO wallet_events VALUES (?,?) ON CONFLICT(id) "
+                   "DO UPDATE SET payload=excluded.payload "
+                   "WHERE wallet_events.payload <> excluded.payload",
                    [(e["id"], json.dumps(e)) for e in events])
 
 
@@ -161,7 +163,10 @@ def collect(args, store):
                  + timedelta(seconds=1)).isoformat()
     coverage, graphs, swaps = {}, {}, []
     followed = {r["address"] for r in store.followed()}
-    with cli._session(args) as session:
+    session = cli._session(args)
+    # Allow Taostats to load the verification widget used by its history tabs.
+    session.ad_block = False
+    with session:
         try:
             earners, market_status = _discover(
                 args, session, store, stamp, graphs)
