@@ -13,13 +13,53 @@ def _chain_order(event):
             int(event.get("event_index") or 0), event["id"])
 
 
+def _stake_side(event):
+    side = event.get("transfer_side")
+    if side:
+        return side
+    owner = event.get("owner")
+    if owner is None:
+        return "both"  # An already-normalized full movement.
+    if event["src"] != event["dst"]:
+        return "out" if owner == event["src"] else "in"
+    return "unknown"
+
+
+def _stake_legs(rows):
+    """A wallet's table describes only its own subnet and quantity. Carry
+    basis only when the opposite leg corroborates the same units and asset.
+    A conversion keeps independent observed debits and credits."""
+    sides = defaultdict(list)
+    for row in sorted(rows, key=_chain_order):
+        sides[_stake_side(row)].append(row)
+    incoming, outgoing = sides["in"], sides["out"]
+    pairs = min(len(incoming), len(outgoing))
+    matched = [dict(src, transfer_side="both", paired_event_id=dst["id"])
+               for src, dst in zip(outgoing, incoming)]
+    return (matched + [dict(e, transfer_side="out") for e in outgoing[pairs:]]
+            + [dict(e, transfer_side="in") for e in incoming[pairs:]]
+            + sides["both"] + [dict(e, transfer_side="unknown")
+                               for e in sides["unknown"]])
+
+
+def _inventory_endpoints(event):
+    side = event.get("transfer_side")
+    if side == "out":
+        return event["src"], None
+    if side == "in":
+        return None, event["dst"]
+    if side == "unknown":
+        return None, None
+    return event["src"], event["dst"]
+
+
 def net_transfers(events):
     """Count matching in/out observations once per actual movement.
 
     Stable row IDs deduplicate repeat scans. Distinct equal movements in a
     single extrinsic keep the multiplicity observed on either account.
     """
-    groups = defaultdict(lambda: defaultdict(list))
+    groups = defaultdict(list)
     unique = {e["id"]: e for e in events}
     result = []
     for e in unique.values():
@@ -29,8 +69,14 @@ def net_transfers(events):
         amount = e["tao"] if e["alpha"] is None else e["alpha"]
         key = (e.get("extrinsic", e["id"]), e["kind"], e["src"], e["dst"],
                e["netuid"], amount)
-        groups[key][e.get("owner")].append(e)
-    for sides in groups.values():
+        groups[key].append(e)
+    for rows in groups.values():
+        if rows[0]["kind"] == "stake_transfer":
+            result.extend(_stake_legs(rows))
+            continue
+        sides = defaultdict(list)
+        for e in rows:
+            sides[e.get("owner")].append(e)
         # Prefer the sender's account if both sides have equal coverage.
         longest = max(sides.items(), key=lambda item: (
             len(item[1]), item[0] == item[1][0]["src"], item[0] or ""))
@@ -203,8 +249,11 @@ def _opening_inventory(timeline):
                 lots[key].alpha = max(-minimum[key],
                                       e["units"].get(key[1], 0) - net[key])
             seen.add(addr)
-        elif e["alpha"] and e["src"] != e["dst"]:
-            for addr, sign in ((e["src"], -1), (e["dst"], 1)):
+        elif e["alpha"]:
+            src, dst = _inventory_endpoints(e)
+            if src == dst:
+                continue
+            for addr, sign in ((src, -1), (dst, 1)):
                 if addr and addr not in seen:
                     key = addr, e["netuid"]
                     net[key] += sign * e["alpha"]
@@ -221,14 +270,19 @@ def _fully_priced(alpha, known):
     return math.isclose(alpha, known, rel_tol=2e-15, abs_tol=1e-13)
 
 
-def portfolio(events, checkpoints):
+def _sale_stats():
+    return dict(wins=0, priced_sales=0, unpriced_sales=0, realized_tao=0.)
+
+
+def portfolio(events, checkpoints, *, subnet_stats=None):
+    """Replay once; optionally write the per-wallet/subnet sale breakdown
+    into the supplied mapping."""
     events = sorted(events, key=_chain_order)
     timeline = [(e["time"], False, e) for e in events]
     timeline.extend((p["time"], True, p) for p in checkpoints)
     timeline.sort(key=lambda item: item[:2])
     lots = _opening_inventory(timeline)
-    stats = defaultdict(lambda: dict(wins=0, priced_sales=0, unpriced_sales=0,
-                                     realized_tao=0.))
+    sales = defaultdict(_sale_stats)
     for _, is_snapshot, e in timeline:
         if is_snapshot:
             addr = e["address"]
@@ -237,13 +291,19 @@ def portfolio(events, checkpoints):
                 lots[addr, n].observe(e["units"].get(n, 0))
             continue
         qty, n = e["alpha"], e["netuid"]
-        if not qty or e["src"] == e["dst"]:
+        src, dst = _inventory_endpoints(e)
+        if e.get("transfer_side") == "unknown":
+            # Older self-transfer rows can lack direction. Their previous
+            # cost can no longer support a priced sale on this subnet.
+            key = e["owner"], n
+            lots[key] = _Holding(lots[key].alpha)
+        if not qty or src == dst:
             continue
         moved = _Holding(qty)
-        if e["src"]:
-            moved = lots[e["src"], n].remove(qty)
+        if src:
+            moved = lots[src, n].remove(qty)
         if e["kind"] == "sell":
-            s = stats[e["src"]]
+            s = sales[src, n]
             if _fully_priced(qty, moved.known):
                 pnl = e["tao"] - moved.cost
                 s["realized_tao"] += pnl
@@ -251,23 +311,31 @@ def portfolio(events, checkpoints):
                 s["wins"] += pnl > 1e-12
             else:
                 s["unpriced_sales"] += 1
-        elif e["dst"]:
+        elif dst:
             if e["kind"] == "buy":
                 moved = _Holding(qty, qty, e["tao"])
             elif e["evidence"] == "snapshot_match":
                 moved.probable += moved.known
                 moved.estimated_cost += moved.cost
                 moved.known = moved.cost = 0.
-            lots[e["dst"], n].add(moved)
+            lots[dst, n].add(moved)
     positions = {key: lot.as_position(*key) for key, lot in lots.items()
                  if lot.alpha > 1e-12}
+    stats = defaultdict(_sale_stats)
+    for (addr, _), s in sales.items():
+        for field, value in s.items():
+            stats[addr][field] += value
+        s["realized_tao"] = round(s["realized_tao"], 9)
+    if subnet_stats is not None:
+        subnet_stats.clear()
+        subnet_stats.update(sales)
     for s in stats.values():
         s["realized_tao"] = round(s["realized_tao"], 9)
     return positions, stats
 
 
-def timing(events, prices):
-    """First observed subnet quote 24 to 30 hours after each trade."""
+def timing_observations(events, prices):
+    """Yield each trade and the first subnet quote 24 to 30 hours later."""
     quotes = defaultdict(list)
     for p in prices:
         if p["price_tao"] and p["price_tao"] > 0:
@@ -275,7 +343,6 @@ def timing(events, prices):
                 datetime.fromisoformat(p["fetched_at"]), p["price_tao"]))
     for rows in quotes.values():
         rows.sort()
-    result = defaultdict(lambda: {"evaluated": 0, "favorable": 0})
     for e in events:
         if e["kind"] not in ("buy", "sell") or not e["alpha"] or not e["tao"]:
             continue
@@ -284,9 +351,14 @@ def timing(events, prices):
         i = bisect_left(rows, (start,))
         if i == len(rows) or rows[i][0] > start + timedelta(hours=6):
             continue
+        yield e, rows[i][1]
+
+
+def timing(events, prices):
+    result = defaultdict(lambda: {"evaluated": 0, "favorable": 0})
+    for e, quote in timing_observations(events, prices):
         p = e["tao"] / e["alpha"]
         s = result[e["src"] or e["dst"]]
         s["evaluated"] += 1
-        s["favorable"] += rows[i][1] > p if e["kind"] == "buy" else (
-            rows[i][1] < p)
+        s["favorable"] += quote > p if e["kind"] == "buy" else quote < p
     return result

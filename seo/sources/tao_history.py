@@ -19,24 +19,65 @@ POLL_INTERVAL = 0.5
 TABLE_QUERY = """
 (() => {
   const root = document.querySelector('.ag-root-wrapper');
-  if (!root) return null;
+  const widget = document.querySelector('.cf-turnstile,'
+    + 'iframe[src*="challenges.cloudflare.com"],'
+    + '[name="cf-turnstile-response"]');
+  const reply = document.querySelector('[name="cf-turnstile-response"]');
+  const diagnostic = {
+    grid_present: !!root,
+    rendered_cells: root?.querySelectorAll('[role=gridcell]').length || 0,
+    widget_present: !!widget, widget_completed: !!reply?.value,
+    page_ready: document.readyState, query_found: false,
+    active_table_queries: 0,
+  };
+  if (!root) return {diagnostic};
   let fiber = root[Object.keys(root).find(k => k.startsWith('__reactFiber'))];
   for (; fiber; fiber = fiber.return) {
     for (const client of [fiber.memoizedProps?.value,
                           fiber.memoizedProps?.client]) {
       if (!client?.getQueryCache) continue;
-      const query = client.getQueryCache().getAll().find(q => {
-        const [name, p] = q.queryKey;
-        return name === NAME && (p?.address || p?.nominator || null) === OWNER
-          && p.order === "timestamp_desc"
-          && Number(p?.page || 1) === PAGE && q.getObserversCount() > 0
+      const queries = client.getQueryCache().getAll().filter(q =>
+        q.queryKey[0] === NAME && q.getObserversCount() > 0);
+      diagnostic.active_table_queries = queries.length;
+      const query = queries.find(q => {
+        const p = q.queryKey[1];
+        return (p?.address || p?.nominator || null) === OWNER
+          && p?.order === "timestamp_desc" && Number(p?.page || 1) === PAGE
           && !p.netuid && !p.action && !p.amount_min && !p.amountMin;
       });
       if (!query) continue;
-      return {status: query.state.status, data: query.state.data ?? null};
+      Object.assign(diagnostic, {
+        query_found: true, query_status: query.state.status,
+        fetch_status: query.state.fetchStatus,
+        failed_attempts: query.state.fetchFailureCount,
+        failure_type: query.state.error?.name || null,
+        http_status: Number(query.state.error?.status ||
+          query.state.error?.response?.status) || null,
+      });
+      return {diagnostic, status: query.state.status,
+              data: query.state.data ?? null};
     }
   }
-  return null;
+  return {diagnostic};
+})()
+"""
+RESOURCE_STATE = """
+(() => {
+  const result = {verification_assets: 0, table_requests: 0,
+                  table_http_statuses: []};
+  for (const entry of performance.getEntriesByType('resource')) {
+    const u = new URL(entry.name, location.href);
+    if (u.hostname === 'challenges.cloudflare.com') {
+      result.verification_assets++;
+    } else if (/(^|\\.)taostats\\.io$/.test(u.hostname) &&
+               ['fetch', 'xmlhttprequest'].includes(entry.initiatorType) &&
+               /delegat|transfer/i.test(u.pathname)) {
+      result.table_requests++;
+      if (entry.responseStatus) result.table_http_statuses.push(
+        entry.responseStatus);
+    }
+  }
+  return result;
 })()
 """
 NEXT = """
@@ -132,10 +173,10 @@ def normalize(raw, tab, address):
                 netuid=netuid, transfer_side=side, evidence="transaction")
 
 
-def fetch_history(session, address, tab, pages):
+def fetch_history(session, address, tab, pages, *, window=None):
     name = "delegate" if tab == "transactions" else "transfers"
     session.goto(account_url(address) + "/" + tab, check_google=False)
-    return _read_pages(session, name, address, tab, pages)
+    return _read_pages(session, name, address, tab, pages, window)
 
 
 def fetch_recent_trades(session, pages=1):
@@ -146,7 +187,7 @@ def fetch_recent_trades(session, pages=1):
     return [r for r in rows if r["kind"] in ("buy", "sell")], coverage
 
 
-def _read_pages(session, name, address, tab, pages):
+def _read_pages(session, name, address, tab, pages, window=None):
     events = {}
     incomplete = False
     for page in range(1, pages + 1):
@@ -155,6 +196,8 @@ def _read_pages(session, name, address, tab, pages):
         result = None
         for _ in range(PAGE_POLLS):
             state = session.sb.evaluate(js)
+            if window is not None and isinstance(state, dict):
+                window["diagnostic"] = state.get("diagnostic", {})
             if isinstance(state, dict) and state.get("status") == "success":
                 result = state.get("data")
                 break
@@ -163,6 +206,10 @@ def _read_pages(session, name, address, tab, pages):
             time.sleep(POLL_INTERVAL)
         if not isinstance(result, dict) or not isinstance(
                 result.get("data"), list):
+            if window is not None:
+                resources = session.sb.evaluate(RESOURCE_STATE)
+                if isinstance(resources, dict):
+                    window.setdefault("diagnostic", {}).update(resources)
             status = "partial" if page > 1 else "unavailable"
             return list(events.values()), status
         pagination = result.get("pagination") or {}
@@ -177,6 +224,10 @@ def _read_pages(session, name, address, tab, pages):
                 events[event["id"]] = event
             else:
                 incomplete = True
+        if window is not None and not incomplete and events:
+            times = [e["time"] for e in events.values()]
+            if times == sorted(times, reverse=True):
+                window["since"] = times[-1]
         total_pages = pagination.get("total_pages")
         try:
             if total_pages is None and "total_items" in pagination:

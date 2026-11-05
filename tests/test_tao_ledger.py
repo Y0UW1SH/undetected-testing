@@ -115,3 +115,86 @@ def test_small_unknown_fraction_of_large_position_cannot_score_win():
     assert positions["a", 8]["buy_price_tao"] is None
     assert stats["a"]["unpriced_sales"] == 1
     assert stats["a"]["wins"] == 0
+
+
+def test_cross_subnet_legs_only_change_the_wallet_and_asset_observed():
+    original = event(1, "buy", None, "a", 10, 2)
+    sent = event(2, "stake_transfer", "a", "b", 6,
+                 owner="a", extrinsic="333-9", id="sent")
+    received = dict(sent, netuid=9, alpha=3, owner="b", id="received")
+    sold = dict(event(3, "sell", "b", None, 1, 20), netuid=9)
+    movements = net_transfers([original, sent, received, sold, sent, received])
+    positions, stats = portfolio(movements, [])
+    assert set(positions) == {("a", 8), ("b", 9)}
+    assert positions["a", 8]["alpha"] == 4
+    assert positions["b", 9]["alpha"] == 2
+    assert positions["b", 9]["buy_price_tao"] is None
+    assert stats["b"]["unpriced_sales"] == 1
+    assert stats["b"]["wins"] == 0
+
+
+def test_late_second_leg_enables_same_subnet_cost_without_phantom_balances():
+    buy = event(1, "buy", None, "a", 10, 3)
+    sent = event(2, "stake_transfer", "a", "b", 4,
+                 owner="a", extrinsic="234-7", id="sent")
+    received = dict(sent, owner="b", id="received")
+    positions, _ = portfolio(net_transfers([buy, sent]), [])
+    assert set(positions) == {("a", 8)}
+    assert positions["a", 8]["alpha"] == 6
+    positions, _ = portfolio(net_transfers([buy, received]), [])
+    assert positions["a", 8]["alpha"] == 10
+    assert positions["b", 8]["buy_price_tao"] is None
+    both = net_transfers([buy, received, sent])
+    assert len(both) == 2
+    positions, _ = portfolio(both, [])
+    assert positions["a", 8]["alpha"] == 6
+    assert positions["b", 8]["buy_price_tao"] == 0.3
+
+
+def test_missing_counterparty_cannot_attach_cost_to_another_wallet():
+    buy = event(1, "buy", None, "a", 8, 2)
+    sent = event(2, "stake_transfer", "a", None, 2,
+                 owner="a", extrinsic="222-5", id="sent")
+    received = dict(sent, owner="b", src=None, dst="b", id="received")
+    positions, stats = portfolio(net_transfers([buy, sent, received]), [])
+    assert positions["a", 8]["alpha"] == 6
+    assert positions["b", 8]["alpha"] == 2
+    assert positions["b", 8]["buy_price_tao"] is None
+    assert not stats
+
+
+def test_same_wallet_subnet_conversion_changes_only_observed_positions():
+    buy = event(1, "buy", None, "a", 8, 2)
+    sent = event(2, "stake_transfer", "a", "a", 2, owner="a",
+                 transfer_side="out", extrinsic="222-5", id="sent")
+    received = dict(sent, alpha=3, netuid=9, transfer_side="in", id="in")
+    positions, _ = portfolio(net_transfers([buy, sent, received]), [])
+    assert positions["a", 8]["alpha"] == 6
+    assert positions["a", 9]["alpha"] == 3
+    assert positions["a", 9]["buy_price_tao"] is None
+
+
+def test_realized_breakdown_separates_subnets_from_mixed_wallet_result():
+    trades = [event(1, "buy", None, "a", 10, 1),
+              dict(event(2, "buy", None, "a", 2, 4), netuid=9),
+              event(3, "sell", "a", None, 5, 1),
+              dict(event(4, "sell", "a", None, 1, 1), netuid=9),
+              dict(event(5, "sell", "a", None, 1, 20), netuid=10)]
+    by_subnet = {}
+    _, stats = portfolio(trades, [], subnet_stats=by_subnet)
+    assert stats["a"]["realized_tao"] == -0.5
+    assert by_subnet["a", 8] == dict(priced_sales=1, wins=1,
+                                     unpriced_sales=0, realized_tao=0.5)
+    assert by_subnet["a", 9]["realized_tao"] == -1
+    assert by_subnet["a", 10]["priced_sales"] == 0
+    assert by_subnet["a", 10]["unpriced_sales"] == 1
+
+
+def test_observation_iteration_returns_each_trade_and_first_eligible_quote():
+    from seo.tao_ledger import timing_observations
+    buy = event(1, "buy", None, "a", 5, 1)
+    sell = event(3, "sell", "a", None, 5, 2)
+    quotes = [dict(netuid=8, price_tao=0.95, fetched_at=day(2)),
+              dict(netuid=8, price_tao=0.15, fetched_at=day(4))]
+    assert list(timing_observations([buy, sell], quotes)) == [
+        (buy, 0.95), (sell, 0.15)]

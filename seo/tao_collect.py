@@ -1,10 +1,13 @@
 """One browser pass for subnet prices, wallet discovery and trading history."""
 import argparse
 import json
+import math
 import os
+import sqlite3
 from collections import defaultdict, deque
 from datetime import timedelta
 from itertools import zip_longest
+from pathlib import Path
 
 from seo import cli, tao_ledger, tao_wallets as wallets
 from seo.models import ChallengeError
@@ -18,6 +21,13 @@ def _number(value):
     return n
 
 
+def _nonnegative(value):
+    n = float(value)
+    if n < 0 or not math.isfinite(n):
+        raise argparse.ArgumentTypeError("choose a finite nonnegative number")
+    return n
+
+
 def add_parser(sub):
     p = sub.add_parser("collect", help="collect subnet prices, wallet "
                        "positions, transactions and transfers in one session")
@@ -27,10 +37,31 @@ def add_parser(sub):
                    help="number of top subnets (0 = every subnet)")
     p.add_argument("--top", type=_number, default=20,
                    help="candidate wallets to inspect (0 = all discovered)")
+    from seo.sources import tao_extrinsic
+    p.add_argument("--extrinsic", type=tao_extrinsic.parse_target,
+                   action="append", default=[], metavar="ID[:EVENT,...]",
+                   help="also verify a known native Taostats detail record "
+                   "(repeatable); independent of wallet table coverage")
     p.add_argument("--address", action="append", type=wallets._check_address,
                    default=[], help="also inspect this wallet (repeatable)")
+    p.add_argument("--addresses-only", action="store_true",
+                   help="skip market discovery and inspect supplied or "
+                   "followed addresses and their transfer peers")
     p.add_argument("--new-wallets", type=_number, default=10,
                    help="maximum extra recipient accounts per run")
+    p.add_argument("--link-depth", type=_number, default=2,
+                   help="maximum transfer hops for discovered wallets")
+    p.add_argument("--min-sales", type=_number, default=2)
+    p.add_argument("--min-timing", type=_number, default=3)
+    p.add_argument("--timing-move-pct", type=_nonnegative, default=5.)
+    p.add_argument("--max-balance-tao", type=_nonnegative, default=100000.,
+                   help="screen larger wallets from rankings and further "
+                   "link discovery (0 disables)")
+    p.add_argument("--max-activity-24h", type=_number, default=100,
+                   help="screen wallets above this observed daily event count "
+                   "(0 disables)")
+    p.add_argument("--price-history", help="prior subnet SQLite database "
+                   "for timing (default: data/tao.sqlite when available)")
     p.add_argument("--history-pages", type=_number, default=3,
                    help="maximum pages per wallet tab; first page = newest")
     p.add_argument("--follow-top", type=_number, default=0,
@@ -74,6 +105,8 @@ def _discover(args, session, store, stamp, coverage):
     if not prices:
         raise ValueError("no subnet prices returned")
     store.save(prices, stamp=stamp)
+    if args.addresses_only:
+        return {}, "skipped"
     if args.netuids:
         netuids = list(dict.fromkeys(int(x) for x in args.netuids.split(",")))
     else:
@@ -121,13 +154,19 @@ def _inspect(args, session, store, address, earner, stamp, coverage):
         snap.rewards_per_day = earner["rewards_per_day"]
         snap.subnets = ",".join(map(str, sorted(earner["subnets"])))
     coverage["account"] = "complete"
+    coverage["balance_total"] = snap.balance_total
     coverage["holds_subnets"] = any(
         p.netuid and p.alpha and p.alpha > 0 for p in positions)
     rows = []
     for tab in ("transactions", "transfers"):
         session.pause()
+        window = {}
         events, status = tao_history.fetch_history(
-            session, address, tab, args.history_pages)
+            session, address, tab, args.history_pages, window=window)
+        if "since" in window:
+            coverage[tab + "_since"] = window["since"]
+        if status != "complete" and window.get("diagnostic"):
+            coverage[tab + "_diagnostic"] = window["diagnostic"]
         coverage[tab] = status
         coverage[tab + "_rows"] = len(events)
         rows.extend(events)
@@ -151,9 +190,52 @@ def _inspect(args, session, store, address, earner, stamp, coverage):
     return snap, rows
 
 
+def _prices(store, path):
+    """Reuse the scheduled subnet workflow's actual observation timestamps."""
+    stored = store.rows("subnet_stats")
+    other = Path(path or "data/tao.sqlite").resolve()
+    if other == Path(store.path).resolve() or not (path or other.exists()):
+        return stored
+    if not other.is_file():
+        raise SystemExit("Price history database does not exist: %s" % other)
+    conn = sqlite3.connect(other.as_uri() + "?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        combined = {(r["netuid"], r["fetched_at"]): dict(r)
+                    for r in conn.execute("SELECT netuid, fetched_at, "
+                                          "price_tao FROM subnet_stats")}
+    finally:
+        conn.close()
+    combined.update({(r["netuid"], r["fetched_at"]): r for r in stored})
+    return sorted(combined.values(), key=lambda r: r["fetched_at"])
+
+
+def _link_candidates(address, snap, rows, followed):
+    """Trace incoming stake to its cost origin before exploring other peers."""
+    incoming, outgoing, cash = set(), set(), set()
+    for e in rows:
+        src, dst = e["src"], e["dst"]
+        if e["kind"] == "stake_transfer":
+            if dst == address:
+                incoming.add(src)
+            if src == address:
+                outgoing.add(dst)
+        elif address in followed and e["kind"] == "tao_transfer":
+            if src == address:
+                cash.add(dst)
+    peers = [snap.swapped_to] + sorted(a for a in incoming if a)
+    peers += sorted(a for a in outgoing | cash if a)
+    return [a for a in dict.fromkeys(peers) if a and a != address
+            and wallets.ADDRESS_RE.fullmatch(a)]
+
+
 def collect(args, store):
     if args.history_pages < 1:
         raise SystemExit("--history-pages must be at least 1")
+    if min(args.min_sales, args.min_timing) < 1:
+        raise SystemExit("--min-sales and --min-timing must be at least 1")
+    if len(args.extrinsic) > 5:
+        raise SystemExit("Choose at most five extrinsics per collection")
     _schema(store.conn)
     stamp = wallets._new_stamp(store)
     previous_price = store.conn.execute(
@@ -163,6 +245,8 @@ def collect(args, store):
                  + timedelta(seconds=1)).isoformat()
     coverage, graphs, swaps = {}, {}, []
     followed = {r["address"] for r in store.followed()}
+    if args.addresses_only and not (args.address or followed):
+        raise SystemExit("--addresses-only needs --address or a watchlist")
     session = cli._session(args)
     # Allow Taostats to load the verification widget used by its history tabs.
     session.ad_block = False
@@ -175,13 +259,11 @@ def collect(args, store):
             return 1
         roots = list(dict.fromkeys([*sorted(followed), *args.address,
                                     *earners]))
-        queue = deque(roots)
+        queue = deque((a, 0) for a in roots)
         queued = set(roots)
         deferred = set()
-        # Inspect direct recipients in this run. Further hops are followed
-        # in later runs, to avoid crawling an exchange's entire transfer tree.
         while queue:
-            address = queue.popleft()
+            address, depth = queue.popleft()
             if address in coverage:
                 continue
             status = coverage[address] = {}
@@ -190,31 +272,46 @@ def collect(args, store):
             print("%s %s" % (address, status), flush=True)
             if not snap:
                 continue
-            peers = set()
             if snap.swapped_to and wallets.ADDRESS_RE.fullmatch(
                     snap.swapped_to) and snap.swapped_to != address:
                 swaps.append((address, snap.swapped_to))
-                peers.add(snap.swapped_to)
-            peers.update(e["dst"] for e in rows if e["src"] == address
-                         and e["kind"] == "stake_transfer" and e["dst"]
-                         and wallets.ADDRESS_RE.fullmatch(e["dst"]))
-            if address in roots:
-                cash_peers = {e["dst"] for e in rows
-                              if address in followed and e["src"] == address
-                              and e["kind"] == "tao_transfer" and e["dst"]
-                              and wallets.ADDRESS_RE.fullmatch(e["dst"])}
-                for peer in sorted(peers) + sorted(cash_peers - peers):
-                    if peer in queued:
-                        continue
-                    if len(queued) - len(roots) >= args.new_wallets:
-                        deferred.add(peer)
-                    else:
-                        queue.append(peer)
-                        queued.add(peer)
+            if depth >= args.link_depth:
+                continue
+            since = (wallets._parse_ts(stamp) - timedelta(days=1)).isoformat()
+            activity = len({e["id"] for e in rows if since <= e["time"]})
+            if ((args.max_balance_tao and snap.balance_total is not None
+                 and snap.balance_total > args.max_balance_tao)
+                    or (args.max_activity_24h
+                        and activity > args.max_activity_24h)):
+                status["link_expansion"] = "screened"
+                continue
+            for peer in _link_candidates(address, snap, rows, followed):
+                if peer in queued:
+                    continue
+                if len(queued) - len(roots) >= args.new_wallets:
+                    deferred.add(peer)
+                else:
+                    queue.append((peer, depth + 1))
+                    queued.add(peer)
+        details = []
+        if args.extrinsic:
+            from seo.sources.tao_extrinsic import fetch_evidence
+            for ident, indices in dict.fromkeys(args.extrinsic):
+                session.pause()
+                details.append(fetch_evidence(session, ident, indices))
     events, checkpoints = _read(store)
     inferred = tao_ledger.inferred_links(checkpoints, events)
-    positions, stats = tao_ledger.portfolio(events + inferred, checkpoints)
-    timing = tao_ledger.timing(events, store.rows("subnet_stats"))
+    subnet_stats = {}
+    positions, stats = tao_ledger.portfolio(events + inferred, checkpoints,
+                                            subnet_stats=subnet_stats)
+    prices = _prices(store, args.price_history)
+    timing = tao_ledger.timing(events, prices)
+    from seo import tao_performance
+    performance = tao_performance.record_run(
+        store, stamp, positions, stats, subnet_stats, events + inferred,
+        prices, coverage, min_sales=args.min_sales, min_timing=args.min_timing,
+        move_pct=args.timing_move_pct, max_balance_tao=args.max_balance_tao,
+        max_activity_24h=args.max_activity_24h)
     traders = []
     for a, s in stats.items():
         if s["priced_sales"]:
@@ -224,13 +321,9 @@ def collect(args, store):
                                                           favorable=0))))
     traders.sort(key=lambda s: (s["realized_tao"], s["priced_sales"]),
                  reverse=True)
-    winners = [
-        s for s in traders if s["realized_tao"] > 0 and not s["unpriced_sales"]
-        and coverage.get(s["address"], {}).get("transactions") == "complete"
-        and s["priced_sales"] >= 2 and s["win_rate"] > 0.5
-    ]
-    for s in winners[:args.follow_top]:
-        store.follow(s["address"])
+    for a in performance["rankings"]["profit"][:args.follow_top]:
+        store.follow(a)
+    screened = {w["address"] for w in performance["wallets"] if w["screens"]}
     watched = {r["address"] for r in store.followed()}
     transfers = [e for e in events + inferred if e["kind"] in (
         "stake_transfer", "tao_transfer")]
@@ -239,7 +332,7 @@ def collect(args, store):
                              e["dst"], {}).get("holds_subnets")]
     # Record processed links so explicit unfollows survive a later replay.
     for src, dst in reachable:
-        if src not in watched or not dst or src == dst:
+        if src not in watched or not dst or src == dst or dst in screened:
             continue
         with store.conn:
             new = store.conn.execute(
@@ -252,6 +345,7 @@ def collect(args, store):
                   recent_trades_status=market_status,
                   deferred_recipients=sorted(deferred),
                   positions=list(positions.values()), traders=traders,
+                  performance=performance, extrinsics=details,
                   transfers=transfers, swaps=swaps, events=events,
                   unpriced_sales={a: s["unpriced_sales"] for a, s
                                   in stats.items() if s["unpriced_sales"]},

@@ -87,7 +87,7 @@ def test_collect_reads_each_wallet_once_and_reports_unavailable_history(
     monkeypatch.setattr(tao_history, "fetch_recent_trades",
                         lambda s: ([], "unavailable"), raising=False)
     monkeypatch.setattr(tao_history, "fetch_history",
-                        lambda *args: ([], "unavailable"), raising=False)
+                        lambda *args, **kw: ([], "unavailable"))
     argv = ["--db", fake_env["db"]]
     tao_cli.main(argv + ["follow", A])
     assert tao_cli.main(argv + ["collect", "--netuids", "8", "--top", "1",
@@ -129,7 +129,7 @@ def test_collect_replay_preserves_transferred_cost(fake_env, monkeypatch):
             B: [trade(2, B, "DELEGATE", 4, 1, A),
                 trade(3, B, "UNDELEGATE", 2, 1)]}
 
-    def history(session, addr, tab, pages):
+    def history(session, addr, tab, pages, **kwargs):
         if tab == "transfers":
             return [], "complete"
         return [tao_history.normalize(r, tab, addr)
@@ -159,3 +159,47 @@ def test_delay_setting_priority(monkeypatch):
     assert parser.parse_args(["collect"]).pauses == (2, 4)
     assert parser.parse_args(["--delay", "1", "collect"]).pauses == (1, 1)
     assert parser.parse_args(["collect", "--delay", "0"]).pauses == (0, 0)
+
+
+def test_follow_inbound_stake_to_cost_origin(fake_env, monkeypatch):
+    original = fakes.google_router
+
+    def pages(url):
+        if url.endswith("/metagraph"):
+            return "", flight("metagraph", [{"coldkey": B, "netuid": 8,
+                                             "daily_total_rewards_as_tao":
+                                             "5000000000"}])
+        if "/account/" in url:
+            addr = url.rsplit("/", 1)[1]
+            return "", account(addr, 4 if addr == B else 6)
+        return original(url)
+
+    def history(session, addr, tab, count, **kwargs):
+        if tab == "transfers":
+            return [], "complete"
+        common = dict(nominator={"ss58": addr}, delegate={"ss58": C}, netuid=8,
+                      amount="1000000000", alpha="4000000000",
+                      extrinsic_id="2-1", timestamp="2026-09-02T00:00:00Z")
+        raw = [dict(common, id="transfer" + addr, is_transfer=True,
+                    action="DELEGATE" if addr == B else "UNDELEGATE",
+                    transfer_address=A if addr == B else B)]
+        if addr == A:
+            raw.append(dict(common, id="purchase", is_transfer=False,
+                            action="DELEGATE", alpha="10000000000",
+                            amount="2000000000", extrinsic_id="1-1",
+                            timestamp="2026-09-01T00:00:00Z"))
+        return [tao_history.normalize(r, tab, addr) for r in raw], "complete"
+
+    monkeypatch.setattr(fakes, "google_router", pages)
+    monkeypatch.setattr(tao_history, "fetch_history", history)
+    monkeypatch.setattr(tao_history, "fetch_recent_trades",
+                        lambda s: ([], "unavailable"))
+    assert tao_cli.main(["--db", fake_env["db"], "collect", "--addresses-only",
+                         "--address", B, "--top", "1", "--new-wallets", "1",
+                         "--out", "result.json"]) == 0
+    with open("result.json", encoding="utf8") as f:
+        report = json.load(f)
+    assert report["metagraph_neurons"] == {}
+    assert A in report["coverage"]
+    receiver = next(p for p in report["positions"] if p["address"] == B)
+    assert receiver["buy_price_tao"] == 0.2

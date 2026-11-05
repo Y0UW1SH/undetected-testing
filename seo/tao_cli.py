@@ -385,8 +385,9 @@ def build_parser():
     sp.set_defaults(func=cmd_export)
 
     tao_wallets.add_parsers(sub)
-    from seo import tao_collect
+    from seo import tao_collect, tao_performance_cli
     tao_collect.add_parser(sub)
+    tao_performance_cli.add_parser(sub)
     return p
 
 

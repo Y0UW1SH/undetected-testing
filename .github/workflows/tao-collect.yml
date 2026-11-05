@@ -17,6 +17,13 @@ on:
       addresses:
         description: "Additional wallet addresses, comma-separated (optional)"
         type: string
+      extrinsics:
+        description: "Known native extrinsics to verify (space-separated, optionally ID:event,event)"
+        type: string
+      addresses_only:
+        description: "Skip discovery and inspect the supplied or followed wallets"
+        type: boolean
+        default: false
       new_wallets:
         description: "Maximum extra recipient accounts to inspect this run"
         type: string
@@ -87,6 +94,8 @@ jobs:
           SUBNETS: ${{ inputs.subnets }}
           TOP: ${{ inputs.top }}
           ADDRESSES: ${{ inputs.addresses }}
+          ADDRESSES_ONLY: ${{ inputs.addresses_only }}
+          EXTRINSICS: ${{ inputs.extrinsics }}
           NEW_WALLETS: ${{ inputs.new_wallets }}
           HISTORY_PAGES: ${{ inputs.history_pages }}
           TAO_DELAY: ${{ inputs.delay }}
@@ -97,16 +106,23 @@ jobs:
           args=(collect --subnets "$SUBNETS" --top "$TOP" --new-wallets "$NEW_WALLETS"
                 --history-pages "$HISTORY_PAGES" --follow-top "$FOLLOW_TOP"
                 --out "$REPORT")
+          if [[ "$ADDRESSES_ONLY" == "true" ]]; then args+=(--addresses-only); fi
           if [[ -n "$NETUIDS" ]]; then args+=(--netuids "$NETUIDS"); fi
           if [[ -n "$ADDRESSES" ]]; then
             IFS=, read -ra addresses <<< "$ADDRESSES"
             for address in "${addresses[@]}"; do args+=(--address "$address"); done
+          fi
+          if [[ -n "$EXTRINSICS" ]]; then
+            read -ra refs <<< "$EXTRINSICS"
+            for ref in "${refs[@]}"; do args+=(--extrinsic "$ref"); done
           fi
           if [[ -n "$TAO_PROXY" ]]; then args+=(--proxy "$TAO_PROXY"); fi
           command -v Xvfb xauth xvfb-run google-chrome >/dev/null
           xvfb-run -a -s "-screen 0 1366x768x24" python -m seo.tao_cli --db "$TAO_DB" "${args[@]}"
 
       - name: Summarize coverage and trading results
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         shell: python
         run: |
           import json
@@ -114,6 +130,7 @@ jobs:
           import re
           from collections import Counter
           from pathlib import Path
+          from seo.tao_performance_cli import append_summary
 
           report = json.loads(Path(os.environ["REPORT"]).read_text())
           coverage = report["coverage"].values()
@@ -126,6 +143,16 @@ jobs:
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
               print("## Wallet collection", file=out)
+              unavailable = [tab for tab in ("transactions", "transfers")
+                             if not any(c.get(tab) == "complete" or c.get(tab + "_rows", 0)
+                                        for c in coverage)]
+              if unavailable:
+                  print("\n**Partial collection.** No account returned usable "
+                        + " or ".join(unavailable) + " history in this run.", file=out)
+              for evidence in report.get("extrinsics", []):
+                  print(f"\n[Taostats detail]({evidence['url']}) · "
+                        f"{evidence.get('status', 'unavailable')}", file=out)
+
               print(f"Scanned {len(report['metagraph_neurons'])} metagraphs "
                     f"and attempted {len(coverage)} wallet accounts.\n", file=out)
               print(f"Recent trade discovery: {report['recent_trades_status']}. "
@@ -174,6 +201,8 @@ jobs:
                       print(f"| {when} | {account(e['src'])} | {account(e['dst'])} | "
                             f"{asset} | {quantity:.9g} | {label} |", file=out)
 
+              append_summary(report, out)
+
       - name: Save wallet history
         shell: bash
         run: |
@@ -197,3 +226,14 @@ jobs:
             ${{ env.REPORT }}
           if-no-files-found: warn
           retention-days: 3
+
+      - name: Check wallet history coverage
+        shell: python
+        run: |
+          import json
+          import os
+          from pathlib import Path
+          report = json.loads(Path(os.environ["REPORT"]).read_text())
+          for tab in ("transactions", "transfers"):
+              if not any(c.get(tab) == "complete" or c.get(tab + "_rows", 0) for c in report["coverage"].values()):
+                  raise SystemExit(f"No wallet returned readable {tab}. The artifact preserves partial data.")

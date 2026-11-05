@@ -60,10 +60,20 @@ up to 20 discovered candidates. `--top 0` selects all discovered
 candidates. Followed wallets are included even when they fall
 outside the selection. Include a specific wallet with `--address <address>`
 (repeatable), or enter additional addresses in the workflow's **addresses**
-input. Transfer recipients can add to the wallet count. `--new-wallets`
+input. The collector checks incoming stake to find the purchasing wallet
+and follows outgoing stake up to `--link-depth` hops (default 2).
+Linked wallets can add to the wallet count. `--new-wallets`
 limits these extra visits to 10 per pass by default. The report lists any
 `deferred_recipients` and gives the market page's `recent_trades_status`.
 Large scans can exceed a single GitHub job's time limit.
+
+On the project PC, `collect_tao.cmd --addresses-only --address <wallet>`
+runs the same collector in local Chrome and writes the database and report
+in `try_tao_out/`. Use `--history-pages 15` to look farther back for an
+original purchase. `--max-balance-tao` and `--max-activity-24h` also bound
+further link discovery. For known native transactions, pass e.g.
+`--extrinsic 9344821-0027:198,199` to verify the Taostats detail pages
+independently. These records do not imply wallet history coverage.
 
 `--history-pages` sets the page limit for each tab, starting with the
 newest activity. A limit of 1 is useful for checking site access. Raising
@@ -87,8 +97,8 @@ performance, open the collector's `tao_collect.json` report.
 * `coverage` records what loaded for each account in this pass. A complete
   empty result means the site returned no rows. Partial means the scan
   reached a page limit or could read only part of the history. Unavailable
-  means the tab supplied no usable result. A successful GitHub job can
-  still report unavailable history.
+  means the tab supplied no usable result. The workflow saves partial data and flags the run if
+  every attempted wallet lacks readable data for either history tab.
 * `positions` records quantities per wallet and subnet with their weighted
   buy price when it can be traced. `transfers` includes native TAO and
   stake movements. A stake transfer can carry known basis from the sender
@@ -123,6 +133,46 @@ performance, open the collector's `tao_collect.json` report.
 the previous run, and writes balance alerts to `data/tao_wallet_alerts.json`.
 `tao unfollow <address>` removes a wallet. The collector produces a
 research report each time it runs.
+
+### Compare wallet performance over time
+
+`tao performance` reads the last saved collection from SQLite.
+`tao performance <address> --history 10` shows that wallet's positions
+and recent ranks. A collector report also includes this run's
+`performance.wallets`, `performance.rankings` and `performance.settings`.
+Earlier runs preserve the evidence and thresholds used at the time.
+
+* **Profit** ranks wallets by cumulative gross realized TAO on priced
+  sales, before separate fees. To qualify, a wallet needs positive
+  realized TAO, wins on more than half its priced sales, complete current
+  account and trade coverage, zero unpriced sales, and at least
+  `--min-sales` priced sales (default 2). The same rank governs
+  `--follow-top`. Check open gains and losses separately.
+* **Buy timing** and **sell timing** use the first subnet quote observed
+  24 to 30 hours after each execution. A buy is favorable when the price
+  rises by at least `--timing-move-pct` (default 5%). A sell is favorable
+  when it falls by that much. Each side needs a majority of favorable
+  results and at least `--min-timing` evaluated trades (default 3) across
+  two or more UTC dates. Rank uses the favorable fraction, then sample
+  count. Trades without a later quote do not enter either count.
+* **Holdings** show the confirmed, estimated and unknown quantities for
+  each subnet. `known_buy_price_tao` and `known_unrealized_tao` cover the
+  traceable portion even when another part of the position has unknown
+  cost. The full `gross_unrealized_tao` requires known basis throughout
+  and a current inventory and quote. The report includes the actual
+  quote time. A stale quote is visible but cannot price a position in
+  this run. Closed subnets still show their realized results.
+* **Screening** defaults to a ceiling of 100,000 TAO in total balance and
+  100 observed trade and transfer movements in the 24 hours up to the run.
+  Set `--max-balance-tao` or `--max-activity-24h` to change a ceiling, or
+  set either to 0 to disable it. `screens` records observed limit breaches.
+  `evidence_gaps` separately identifies missing information. A capped
+  tab can establish the activity count when its contiguous rows cover
+  the full 24-hour window. These screens identify balance and activity
+  levels. The output makes no claim about who owns a wallet.
+* **Transfers** retain the source, destination, subnet, evidence type
+  and latest observed extrinsic when available. Each address keeps its
+  own profit and ranks, even when its acquisition cost follows the stake.
 
 ## Run the wallet collector on GitHub
 
