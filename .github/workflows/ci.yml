@@ -51,6 +51,11 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    # These scripts drive live third-party sites from GitHub runners, so
+    # they fail whenever a site changes its markup or blocks runner IPs.
+    # Report those failures without turning the whole workflow red; lint
+    # and unit-tests are what gate a commit.
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -195,7 +200,7 @@ jobs:
             echo "::endgroup::"
           done <<< "${{ matrix.scripts }}"
           if [ "${#failed[@]}" -gt 0 ]; then
-            echo "::error::${#failed[@]} script(s) failed:"
+            echo "::warning::${#failed[@]} live-site script(s) failed:"
             printf '  %s\n' "${failed[@]}"
             exit 1
           fi
