@@ -53,8 +53,9 @@ seo doctor --browser
   Maps business data at scale.
 * GitHub Actions runners are cloud IPs: Maps generally works, web search
   is often challenged. The daily `seo.yml` workflow records the rate.
-* On ARM64 Chromium, bot.sannysoft.com reports one failed fingerprint
-  check, so `raw_cdp_mode.py` runs in an x86 CI group.
+* bot.sannysoft.com reports one failed fingerprint check on GitHub
+  runners (x86 and ARM64), so `raw_cdp_mode.py` is not part of the CI
+  matrix; run it locally.
 
 ### Also in this release
 
