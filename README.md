@@ -81,6 +81,14 @@ seo batch
 seo report            # -> data/report.html (plus data/grid_*.html heatmaps)
 ```
 
+To update an existing install to the latest `master` (pip otherwise
+keeps the build it already has for the same version number):
+
+```bash
+pip install --upgrade --force-reinstall --no-deps \
+    "git+https://github.com/Y0UW1SH/undetected-testing@master"
+```
+
 `seo doctor` tells you exactly what to install when something is missing.
 Every command prints what it is doing and ends with the next command to
 run. Results accumulate in `data/seo.sqlite`; `seo report` turns them
