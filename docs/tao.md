@@ -201,14 +201,23 @@ stake moves; the receiving account inherits the traceable acquisition cost.
 
 The daily GitHub watchlist reconciliation uses Taostats only. Specify
 `watch_addresses` on a manual collection to save wallets on the data branch.
+Use `holders_only` for a smaller follow-up on selected subnets: the
+collector samples their Holders tabs and opens those accounts without
+rechecking unrelated metagraphs, traders or previously followed accounts.
 The first readable check of each tab sets a baseline; subsequent checks
 record indexed movements, and an unreadable interval remains marked as a gap.
 An outgoing TAO transfer is not sale proceeds just because it followed a sale.
 
-For a five-minute movement feed, download the wallet report and then run
-`watch_wallets.cmd --setup` once and `watch_wallets.cmd` on your PC.
-The local watcher reads the latest cached watchlist and asks for your Dwellir
-key in a masked console if it isn't already set locally. Leave that console
+For a five-minute movement feed, run `watch_wallets.cmd --setup` once and
+then `watch_wallets.cmd` on your PC. The launcher checks GitHub for a newer
+completed wallet report on startup and about every six hours while running.
+It can continue from a downloaded report when GitHub is unreachable. The
+`gh` CLI must be signed in locally to download Actions artifacts.
+The watcher uses the screened watchlist and up to three early-entry and
+three timely-exit candidates from the most recent discovery. A timing
+signal does not establish profit when the wallet's purchase cost is missing.
+The watcher asks for your Dwellir key in a masked console if it isn't
+already set locally. Leave that console
 running; refresh the HTML to see its latest successful block, lag, and
 movements. It reads finalized blocks and resumes from its local checkpoint.
 It cannot send five-minute updates while the PC is asleep or off. Local

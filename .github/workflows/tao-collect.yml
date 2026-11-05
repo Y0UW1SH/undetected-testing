@@ -38,6 +38,10 @@ on:
         description: "Skip discovery and inspect the supplied or followed wallets"
         type: boolean
         default: false
+      holders_only:
+        description: "Focus on actual subnet holders; skip unrelated metagraphs, traders and watchlist"
+        type: boolean
+        default: false
       new_wallets:
         description: "Maximum extra recipient accounts to inspect this run"
         type: string
@@ -138,6 +142,7 @@ jobs:
           ADDRESSES: ${{ inputs.addresses }}
           WATCH_ADDRESSES: ${{ inputs.watch_addresses }}
           ADDRESSES_ONLY: ${{ github.event_name == 'schedule' || inputs.addresses_only }}
+          HOLDERS_ONLY: ${{ inputs.holders_only }}
           EXTRINSICS: ${{ inputs.extrinsics }}
           NEW_WALLETS: ${{ inputs.new_wallets || '2' }}
           HISTORY_PAGES: ${{ inputs.history_pages || '4' }}
@@ -150,6 +155,7 @@ jobs:
                 --history-pages "$HISTORY_PAGES" --follow-top "$FOLLOW_TOP"
                 --out "$REPORT")
           if [[ "$ADDRESSES_ONLY" == "true" ]]; then args+=(--addresses-only --history-charts 2); fi
+          if [[ "$HOLDERS_ONLY" == "true" ]]; then args+=(--holders-only --history-charts 2); fi
           if [[ -n "$NETUIDS" ]]; then args+=(--netuids "$NETUIDS"); fi
           if [[ -n "$ADDRESSES" ]]; then
             IFS=, read -ra addresses <<< "$ADDRESSES"

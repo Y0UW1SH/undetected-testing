@@ -47,9 +47,13 @@ def add_parser(sub):
     p.add_argument("--watch-address", action="append",
                    type=wallets._check_address, default=[],
                    help="monitor this wallet across runs (repeatable)")
-    p.add_argument("--addresses-only", action="store_true",
-                   help="skip market discovery and inspect supplied or "
-                   "followed addresses and their transfer peers")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--addresses-only", action="store_true",
+                      help="skip market discovery and inspect supplied or "
+                      "followed addresses and their transfer peers")
+    mode.add_argument("--holders-only", action="store_true",
+                      help="sample subnet holders without rescanning unrelated"
+                      " traders, metagraphs or the existing watchlist")
     p.add_argument("--new-wallets", type=_number, default=10,
                    help="maximum extra recipient accounts per run")
     p.add_argument("--link-depth", type=_number, default=2,
@@ -149,13 +153,14 @@ def _discover(args, session, store, stamp, coverage, holders, origins):
     from seo.sources.tao_holders import fetch_holders
     held = []
     for n in netuids:
-        session.pause()
-        try:
-            found = site.fetch_metagraph(session, n)
-        except ChallengeError:
-            found = []
-        coverage[n] = len(found)
-        neurons.extend(found)
+        if not args.holders_only:
+            session.pause()
+            try:
+                found = site.fetch_metagraph(session, n)
+            except ChallengeError:
+                found = []
+            coverage[n] = len(found)
+            neurons.extend(found)
         investor, state = fetch_holders(session, n, limit=6, pages=2)
         holders[n] = dict(status=state, sampled_wallets=investor)
         # Don't spend the first holder slot of every subnet on its single
@@ -163,8 +168,14 @@ def _discover(args, session, store, stamp, coverage, holders, origins):
         held.append(investor[1:] + investor[:1])
         for a in investor:
             origins[a].add("Taostats holders: SN%d" % n)
-        print("SN%d: %d neurons; %d sampled holders (%s)"
-              % (n, len(found), len(investor), state), flush=True)
+        graph = "%d neurons; " % coverage[n] if n in coverage else ""
+        print("SN%d: %s%d sampled holders (%s)"
+              % (n, graph, len(investor), state), flush=True)
+    investors = iter(dict.fromkeys(a for group in zip_longest(*held)
+                                   for a in group if a))
+    if args.holders_only:
+        selected = list(investors)[:args.top or None]
+        return dict.fromkeys(selected), "skipped"
     earners = site.earners(neurons)
     ranked = wallets.pick_candidates(earners, args.top or len(earners))
     session.pause()
@@ -181,8 +192,6 @@ def _discover(args, session, store, stamp, coverage, holders, origins):
     active = [a for group in zip_longest(*by_subnet.values())
               for a in group if a]
     active = iter(dict.fromkeys(active))
-    investors = iter(dict.fromkeys(a for group in zip_longest(*held)
-                                   for a in group if a))
     # Mix traders and actual alpha holders before another subnet operator.
     candidates = {}
     operators = iter(e["coldkey"] for e in ranked)
@@ -330,8 +339,8 @@ def collect(args, store):
         except ValueError as exc:
             print("Collection failed: %s" % exc)
             return 1
-        roots = list(dict.fromkeys([*sorted(followed), *args.address,
-                                    *earners]))
+        refresh = sorted(followed) if not args.holders_only else []
+        roots = list(dict.fromkeys([*refresh, *args.address, *earners]))
         queue = deque((a, 0) for a in roots)
         queued = set(roots)
         deferred = set()
@@ -443,10 +452,13 @@ def collect(args, store):
                 store.follow(dst)
     from seo import tao_monitor
     following = [r["address"] for r in store.followed()]
-    monitor = tao_monitor.update(store.conn, stamp, following,
+    checked_watch = [a for a in following if a in coverage]
+    monitor = tao_monitor.update(store.conn, stamp, checked_watch,
                                  events, coverage)
+    mode = ("watchlist" if args.addresses_only else "holder_supplement"
+            if args.holders_only else "discovery")
     report = dict(checked_at=stamp, metagraph_neurons=graphs,
-                  mode="watchlist" if args.addresses_only else "discovery",
+                  mode=mode,
                   monitor=monitor, historical_prices=chart_info,
                   sale_details=sale_details, timing_evidence=proof,
                   transfer_details=transfer_details,

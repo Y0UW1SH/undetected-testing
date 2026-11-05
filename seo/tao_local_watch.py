@@ -3,6 +3,7 @@ import argparse
 from collections import defaultdict
 from contextlib import closing, suppress
 from datetime import datetime, timezone
+from functools import lru_cache
 import getpass
 import hashlib
 import json
@@ -20,6 +21,7 @@ import warnings
 
 HOST = "api-bittensor-mainnet.n.dwellir.com"
 INTERVAL = 300
+SNAPSHOT_INTERVAL = 6 * 60 * 60
 RPC_PER_SECOND = 10
 KEEP = 500
 SOURCE = "local-finney-events-v1"
@@ -328,35 +330,174 @@ def _write(path, content):
 
 
 def _report_path(cache):
-    for folder in sorted((p for p in cache.glob("*") if p.is_dir()
-                          and p.name.isdecimal()), key=lambda p: int(p.name),
-                         reverse=True):
-        path = next(folder.rglob("tao_collect.json"), None)
-        if path:
-            return path
-    raise WatchError("No cached wallet report found. Run "
-                     "view_wallets_github.cmd or pass --report.")
+    from seo.tao_view import newest_cached
+    return newest_cached(cache)
+
+
+def _screened(report):
+    blocked = set()
+    for wallet in report.get("performance", {}).get("wallets", []):
+        if wallet.get("screens"):
+            with suppress(ValueError):
+                blocked.add(_addr(wallet["address"]))
+    return blocked
+
+
+def _timing_picks(report):
+    ranks = report.get("performance", {}).get("rankings", {})
+    blocked = _screened(report)
+    picks = {"buy": [], "sell": []}
+    for side, selected in picks.items():
+        for raw in ranks.get(side, []):
+            try:
+                address = _addr(raw)
+            except ValueError:
+                continue
+            if address not in blocked and address not in selected:
+                selected.append(address)
+                if len(selected) == 3:
+                    break
+    return picks
+
+
+def _report_time(value):
+    try:
+        t = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    except (AttributeError, ValueError):
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+@lru_cache(maxsize=32)
+def _cached_selection_snapshot(path, _mtime, _size):
+    """Cache only the local selection metadata from a downloaded report."""
+    report = json.loads(path.read_text(encoding="utf8"))
+    return dict(mode=report.get("mode", "discovery"),
+                checked_at=report.get("checked_at"),
+                picks=_timing_picks(report), blocked=_screened(report))
+
+
+def _cached_discovery(cache, after=None):
+    """Recover last discovery and intervening screen exclusions when a
+    watcher starts on a later watchlist-only report."""
+    from seo.tao_view import _date, run_snapshot
+
+    cutoff = _report_time(after)
+    files = []
+    for folder in cache.glob("*"):
+        if not folder.is_dir() or not folder.name.isdecimal():
+            continue
+        path = run_snapshot(folder)
+        if path is not None:
+            when = _date(path)
+            if when is not None and when >= cutoff:
+                files.append((when, int(folder.name), path))
+    later_screens = set()
+    for _, _, path in sorted(files, reverse=True):
+        try:
+            stat = path.stat()
+            snapshot = _cached_selection_snapshot(
+                path, stat.st_mtime_ns, stat.st_size)
+        except (OSError, ValueError):
+            continue
+        if snapshot["mode"] == "discovery":
+            return dict(snapshot, later_screens=later_screens)
+        later_screens.update(snapshot["blocked"])
+    return dict(later_screens=later_screens) if later_screens else None
+
+
+def _address_reasons(report, explicit, picks=None):
+    blocked = _screened(report)
+    if picks is None:
+        picks = (_timing_picks(report)
+                 if report.get("mode", "discovery") == "discovery" else {})
+    reasons = defaultdict(list)
+    sources = (("followed", report.get("following", [])),
+               ("buy_timing", picks.get("buy", [])),
+               ("sell_timing", picks.get("sell", [])), ("manual", explicit))
+    try:
+        for reason, addresses in sources:
+            for raw in addresses:
+                address = _addr(raw)
+                if reason != "manual" and address in blocked:
+                    continue
+                if reason not in reasons[address]:
+                    reasons[address].append(reason)
+    except (TypeError, ValueError):
+        raise WatchError("Use full Finney coldkey addresses.")
+    return dict(reasons)
+
+
+def _selection(report, explicit, previous=None, discovery=None):
+    """Advance timing picks only on newer discoveries; screens apply now."""
+    previous = previous or {}
+    state = dict(discovery_at=previous.get("discovery_at"),
+                 buy=list(previous.get("buy", [])),
+                 sell=list(previous.get("sell", [])))
+    if not report:
+        return _address_reasons({}, explicit, {}), state
+    if report.get("mode", "discovery") == "discovery":
+        discovery = dict(checked_at=report.get("checked_at"),
+                         picks=_timing_picks(report))
+    elif discovery and "performance" in discovery:
+        discovery = dict(checked_at=discovery.get("checked_at"),
+                         picks=_timing_picks(discovery))
+    discovery = discovery or {}
+    stamp = discovery.get("checked_at")
+    newer = _report_time(stamp) > _report_time(state["discovery_at"])
+    if "picks" in discovery and (not previous or newer):
+        state.update(discovery["picks"], discovery_at=stamp)
+    revoked = _screened(report) | set(discovery.get("later_screens", []))
+    for side in ("buy", "sell"):
+        state[side] = [a for a in state[side] if a not in revoked]
+    return _address_reasons(report, explicit, state), state
 
 
 def _addresses(report, explicit):
-    blocked = {w["address"] for w in report.get("performance", {}).get(
-        "wallets", []) if w.get("screens")}
-    try:
-        chosen = [_addr(a) for a in report.get("following", [])
-                  if a not in blocked] + [_addr(a) for a in explicit]
-    except (TypeError, ValueError):
-        raise WatchError("Use full Finney coldkey addresses.")
-    if not chosen:
-        raise WatchError("This report has no eligible followed wallets. "
+    reasons = _address_reasons(report, explicit)
+    if not reasons:
+        raise WatchError("No eligible followed or timing wallets. "
                          "Supply --address with the wallet to monitor.")
-    return sorted(set(chosen))
+    return sorted(reasons)
 
 
 def _persist(args, feed, report):
     _write(args.out, json.dumps(feed, indent=2, allow_nan=False))
     if report:
-        from seo.tao_view import render
-        _write(args.view, render(report, feed))
+        from seo.tao_view import _archive, render
+        html = render(report, feed)
+        if args.report:
+            cache = args.view.parent
+            if getattr(args, "cached_report", False):
+                cache = Path("github_out")
+            html = _archive(html, report, args.report, cache, args.view.parent)
+        _write(args.view, html)
+
+
+def _cached_snapshot(args, previous, feed, check):
+    from seo.tao_view import _report_date, load_snapshot, refresh_latest
+    cache = Path("github_out")
+    if check:
+        path, warning = refresh_latest(cache)
+        feed["snapshot_refresh"] = dict(
+            checked_at=_now(), status="unavailable" if warning else "ok")
+        if warning:
+            print("%s Continuing with locally available data." % warning,
+                  flush=True)
+    else:
+        path = _report_path(cache)
+    if not path:
+        return previous
+    try:
+        chosen = load_snapshot(path)
+    except (OSError, ValueError, TypeError, OverflowError):
+        return previous
+    if previous and _report_date(previous) > _report_date(chosen):
+        return previous
+    if path.resolve() in (args.view.resolve(), args.out.resolve()):
+        raise WatchError("Use separate paths for the report, feed and view.")
+    args.report = path
+    return chosen
 
 
 def _notice(event):
@@ -374,8 +515,6 @@ def _notice(event):
 
 
 def _run(args):
-    if args.cached_report:
-        args.report = _report_path(Path("github_out"))
     paths = [args.out, args.view] + ([args.report] if args.report else [])
     if len({p.resolve() for p in paths}) != len(paths):
         raise WatchError("Use separate paths for the report, feed and view.")
@@ -391,10 +530,9 @@ def _run(args):
             if feed.get("source") != SOURCE:
                 raise WatchError("The output already exists and is not a "
                                  "local watcher feed. Choose a new path.")
-        report = (json.loads(args.report.read_text(encoding="utf8"))
-                  if args.report else {})
-        addresses = _addresses(report, args.address)
-        url = _endpoint(args.prompt)
+        report = {}
+        next_snapshot = 0.
+        url = None
         # Remote errors/log lines can contain the key-bearing endpoint.
         level = logging.root.manager.disable
         logging.disable(logging.CRITICAL)
@@ -403,18 +541,38 @@ def _run(args):
             while True:
                 start = time.monotonic()
                 notices = []
-                if args.report:
-                    if args.cached_report:
-                        args.report = _report_path(Path("github_out"))
+                if args.cached_report:
+                    check = args.refresh_snapshots and start >= next_snapshot
+                    if check:
+                        next_snapshot = start + SNAPSHOT_INTERVAL
+                    report = _cached_snapshot(args, report, feed, check)
+                elif args.report:
                     report = json.loads(args.report.read_text(encoding="utf8"))
-                    addresses = _addresses(report, args.address)
+                previous = feed.get("timing_selection") or {}
+                discovery = None
+                if args.cached_report and (
+                        report.get("mode", "discovery") != "discovery"):
+                    discovery = _cached_discovery(Path("github_out"),
+                                                  previous.get("discovery_at"))
+                reasons, timing = _selection(report, args.address, previous,
+                                             discovery)
+                addresses = sorted(reasons)
                 try:
-                    if chain is None:
-                        chain = _connect(url, args.rpc_limit)
+                    if addresses:
+                        if chain is None:
+                            if url is None:
+                                url = _endpoint(args.prompt)
+                            chain = _connect(url, args.rpc_limit)
+                        else:
+                            chain.requests = 0
+                        feed = poll(chain, feed, addresses, args.max_blocks,
+                                    notices)
                     else:
-                        chain.requests = 0
-                    feed = poll(chain, feed, addresses, args.max_blocks,
-                                notices)
+                        feed = dict(feed, source=SOURCE, status="no_wallets",
+                                    checked_at=_now(), addresses=[], events=[],
+                                    address_coverage_start={}, rpc_calls=0,
+                                    poll_interval_seconds=INTERVAL,
+                                    stale_after_seconds=660)
                 except WatchError:
                     raise
                 except Exception:
@@ -425,6 +583,8 @@ def _run(args):
                                 stale_after_seconds=660)
                 feed["rpc_limit"] = args.rpc_limit
                 feed["rpc_rate_limit"] = RPC_PER_SECOND
+                feed["selection_reasons"] = reasons
+                feed["timing_selection"] = timing
                 _persist(args, feed, report)
                 for row in notices:
                     print(_notice(row), flush=True)
@@ -458,6 +618,9 @@ def main(argv=None):
     p.add_argument("--report", type=Path, help="GitHub collector JSON")
     p.add_argument("--cached-report", action="store_true",
                    help="use the newest cached report unless --report is set")
+    p.add_argument("--refresh-snapshots", action="store_true",
+                   help="check GitHub for a wallet snapshot on startup and "
+                   "every six hours; fall back to the local cache")
     p.add_argument("--address", action="append", default=[], metavar="WALLET")
     p.add_argument("--out", type=Path,
                    default=Path("try_tao_out/local_wallet_activity.json"))
@@ -470,8 +633,8 @@ def main(argv=None):
     p.add_argument("--prompt", action="store_true",
                    help="ask for a masked key if it is missing locally")
     args = p.parse_args(argv)
-    if args.report:
-        args.cached_report = False
+    args.cached_report = not args.report and (
+        args.cached_report or args.refresh_snapshots)
     if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
         print("The Dwellir watcher runs only on a local PC.", file=sys.stderr)
         return 2

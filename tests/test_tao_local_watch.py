@@ -167,6 +167,85 @@ def test_public_screens_apply_only_to_report_following():
     assert _addresses(report, [A]) == sorted([A, B])
 
 
+def test_local_watch_includes_screened_timing_ranks_without_promoting_profit():
+    from seo.tao_local_watch import _address_reasons, _addresses
+
+    a, b, c, d, e, f, g, h = ["5" + char * 47 for char in "ABCDEFGH"]
+    report = dict(following=[a, b], performance={
+        "wallets": [{"address": b, "screens": ["balance_above_limit"]}],
+        "rankings": {"buy": [b, c, c, a, d, e], "sell": [e, c, f, g],
+                     "profit_partial": [h], "open_partial": [h]}})
+    reasons = _address_reasons(report, [b, b])
+    assert reasons == {a: ["followed", "buy_timing"], b: ["manual"],
+                       c: ["buy_timing", "sell_timing"], d: ["buy_timing"],
+                       e: ["sell_timing"], f: ["sell_timing"]}
+    assert _addresses(report, [b]) == sorted(reasons)
+    assert report["following"] == [a, b]
+
+
+def test_watchlist_reports_keep_discovery_picks_until_revoked_or_replaced():
+    from seo.tao_local_watch import _selection
+
+    discovery = dict(mode="discovery", checked_at="2026-11-01T00:00:00Z",
+                     performance={"wallets": [], "rankings": {"buy": [A, B]}})
+    first, state = _selection(discovery, [])
+    assert first == {A: ["buy_timing"], B: ["buy_timing"]}
+    watch = dict(mode="watchlist", checked_at="2026-11-02T00:00:00Z",
+                 performance={"wallets": [{"address": A, "screens": ["high"]}],
+                              "rankings": {"buy": [A]}})
+    reasons, state = _selection(watch, [], state)
+    assert reasons == {B: ["buy_timing"]}
+    watch["performance"]["wallets"] = []
+    reasons, state = _selection(watch, [], state, discovery)
+    assert reasons == {B: ["buy_timing"]}
+    manual, preserved = _selection({}, [A], state)
+    assert manual == {A: ["manual"]} and preserved == state
+    supplement = dict(watch, mode="holder_supplement")
+    reasons, state = _selection(supplement, [], state, discovery)
+    assert reasons == {B: ["buy_timing"]}
+    next_run = dict(discovery, checked_at="2026-11-03T00:00:00Z",
+                    performance={"wallets": [], "rankings": {"sell": [A]}})
+    reasons, state = _selection(next_run, [], state)
+    assert reasons == {A: ["sell_timing"]}
+
+
+def test_cached_discovery_respects_intervening_watchlist_screens(tmp_path):
+    from seo.tao_local_watch import _cached_discovery, _selection
+
+    blocked = [{"address": B, "screens": ["high"]}]
+    for n, mode, wallets in [(1, "discovery", []), (2, "watchlist", blocked),
+                             (3, "watchlist", [])]:
+        # A rerun can have an older run ID than the prior discovery.
+        folder = tmp_path / str(100 - n)
+        folder.mkdir()
+        report = dict(mode=mode, checked_at=f"2026-11-0{n}T00:00:00Z",
+                      performance={"wallets": wallets,
+                                   "rankings": {"buy": [A, B]}})
+        (folder / "tao_collect.json").write_text(json.dumps(report))
+    older = _cached_discovery(tmp_path)
+    picked, state = _selection(report, [], None, older)
+    assert picked == {A: ["buy_timing"]}
+    picked, _ = _selection(report, [], state, _cached_discovery(
+        tmp_path, after=state["discovery_at"]))
+    assert picked == {A: ["buy_timing"]}
+
+
+def test_hex_alias_cannot_bypass_a_public_screen_or_use_two_slots():
+    from seo.tao_local_watch import _addr, _address_reasons
+
+    raw = "0x" + "11" * 32
+    canonical = _addr(raw)
+    report = dict(following=[raw], performance={
+        "rankings": {"buy": [raw, canonical, A, B]},
+        "wallets": [{"address": canonical, "screens": ["high"]}]})
+    assert _address_reasons(report, []) == {
+        A: ["buy_timing"], B: ["buy_timing"]}
+    report["performance"]["wallets"] = []
+    picked = _address_reasons(report, [])
+    assert list(picked) == [canonical, A, B]
+    assert picked[canonical] == ["followed", "buy_timing"]
+
+
 def test_same_wallet_hotkey_switch_is_one_movement_not_two_alerts():
     from seo.tao_local_watch import block_events
     other_hot = "5" + "Z" * 47

@@ -93,9 +93,30 @@ grid(s,['Wallet','Transactions','Transfers'],Object.entries(m.status||{}).map(([
 grid(s,['Time','Wallet','Movement','Subnet','Alpha','TAO','Extrinsic'],rc.map(e=>[time(e.time),acct(e.watched_address),e.kind,e.netuid??'—',num(e.alpha,4),num(e.tao),anchor('extrinsic',e.extrinsic)]),'No new indexed movements since the watchlist baseline.');
 if(R.local_feed){const f=R.local_feed;add(s,'h3','Local finalized activity');const state=add(s,'p');
 const describe=()=>{let stale=Date.now()-Date.parse(f.checked_at)>1000*(f.stale_after_seconds||660);state.textContent='Status: '+(stale?'stale snapshot — refresh this file or check the watcher':(f.status||'unknown'))+' · Checked '+time(f.checked_at)+' · Last scanned block '+num(f.last_scanned_block,0)+' · '+num(f.lag_blocks,0)+' blocks behind. Stake changes are observations; the next Taostats pass reconciles trades and cost.'};describe();setInterval(describe,60000);
+if(f.selection_reasons){
+  const labels={followed:'Saved watchlist',buy_timing:'Buys before rises',sell_timing:'Sales before falls',manual:'Added locally'};
+  const selected=Object.entries(f.selection_reasons);
+  if(selected.some(([,reasons])=>reasons.some(r=>r==='buy_timing'||r==='sell_timing'))){
+    const date=f.timing_selection?.discovery_at;
+    add(s,'p','Timing picks qualified on later price moves. Their realized profit may be unknown.'+(date?' Discovery checked '+time(date)+'.':''));
+  }
+  grid(s,['Wallet monitored locally','Selection reason'],selected.map(([address,reasons])=>[acct(address),reasons.map(r=>labels[r]||r).join(', ')]),'No wallets selected for this local poll.');
+}
 grid(s,['Time','Movement','From','To','Subnet','Alpha','TAO','Extrinsic'],(f.events||[]).map(e=>[time(e.time),e.kind,acct(e.src),acct(e.dst),e.netuid??'—',num(e.alpha,4),num(e.tao),anchor('extrinsic',e.extrinsic)]),'No matching finalized movements in the local coverage window.')}
 else{add(s,'h3','Five-minute local checks');add(s,'p','No local chain feed is attached. Start watch_wallets.cmd on this PC to check finalized movements for your watchlist.');}}
-function toggle(f){$('feed').hidden=!f;$('list').hidden=f;$('bfeed').setAttribute('aria-pressed',f);$('bwallet').setAttribute('aria-pressed',!f)}
+let movementRefresh;
+function toggle(f){
+  $('feed').hidden=!f;$('list').hidden=f;$('bfeed').setAttribute('aria-pressed',f);$('bwallet').setAttribute('aria-pressed',!f);
+  if(!R.local_feed)return;
+  clearTimeout(movementRefresh);
+  if(f){
+    if(location.hash!=='#activity')history.replaceState(null,'','#activity');
+    movementRefresh=setTimeout(()=>{if(!$('feed').hidden)location.reload()},300000);
+  }else if(location.hash==='#activity'){
+    history.replaceState(null,'',location.href.split('#')[0]);
+  }
+}
 $('stamp').textContent='Taostats snapshot · '+time(R.checked_at)+' · '+Object.keys(R.coverage||{}).length+' wallets inspected · '+(R.events||[]).length+' stored movements';
 $('search').oninput=listing;$('board').onchange=listing;$('bfeed').onclick=()=>toggle(true);$('bwallet').onclick=()=>toggle(false);listing();feed();
+if(location.hash==='#activity')toggle(true);
 </script></main></body></html>

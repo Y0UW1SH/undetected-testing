@@ -7,31 +7,52 @@ from seo.tao_wallets import ADDRESS_RE
 SELECT_HOLDERS = r"""
 (() => {
   const buttons = [...document.querySelectorAll('button')];
-  const tab = buttons.find(b => /^holders(?:\s*\(|$)/i.test(
-    b.innerText.trim()));
+  const tab = buttons.find(b => !b.disabled && b.getClientRects().length &&
+    /^holders(?:\s*\(|$)/i.test(b.innerText.trim()));
   if (!tab) return false;
   tab.click(); return true;
 })()
 """
 READ_PAGE = r"""
 (() => {
-  const tab = [...document.querySelectorAll('button')].find(
-    b => /^holders(?:\s*\(|$)/i.test(b.innerText.trim()));
-  if (!tab) return null;
-  let fiber = tab[Object.keys(tab).find(k => k.startsWith('__reactFiber'))];
+  const grid = [...document.querySelectorAll('.ag-root-wrapper')].find(
+    g => g.querySelector('[role=columnheader][col-id=coldkey]') &&
+         g.querySelector('[role=columnheader][col-id=balance]'));
+  const tab = [...document.querySelectorAll('button')].find(b =>
+    b.getClientRects().length && /^holders(?:\s*\(|$)/i.test(
+      b.innerText.trim()));
+  const control = document.querySelector('#cf-turnstile');
+  const box = control?.getBoundingClientRect();
+  const hit = box && document.elementFromPoint(box.left + 20, box.top + 32);
+  const reply = document.querySelector('[name="cf-turnstile-response"]');
+  const diagnostic = {grid_present: !!grid, query_found: false,
+    cells: grid?.querySelectorAll('[role=gridcell]').length || 0,
+    widget_present: !!(control || reply), widget_completed: !!reply?.value,
+    control_visible: !!(box && box.width >= 200 && box.height >= 50 &&
+                        control.contains(hit))};
+  const anchor = grid || tab;
+  if (!anchor) return {diagnostic};
+  const key = Object.keys(anchor).find(k => k.startsWith('__reactFiber'));
+  let fiber = anchor[key];
   for (; fiber; fiber = fiber.return) {
     for (const client of [fiber.memoizedProps?.value,
                           fiber.memoizedProps?.client]) {
       if (!client?.getQueryCache) continue;
       const q = client.getQueryCache().getAll().find(q => {
         const [name, p] = q.queryKey;
-        return name === 'stakeBalance' && Number(p.netuid) === NETUID
-          && Number(p.page || 1) === PAGE && q.getObserversCount() > 0;
+        return name === 'stakeBalance' && Number(p?.netuid) === NETUID
+          && Number(p?.page || 1) === PAGE && q.getObserversCount() > 0;
       });
-      if (q) return {status: q.state.status, data: q.state.data};
+      if (q) {
+        diagnostic.query_found = true;
+        diagnostic.fetch_status = q.state.fetchStatus;
+        diagnostic.http_status = Number(q.state.error?.status ||
+          q.state.error?.response?.status) || null;
+        return {diagnostic, status: q.state.status, data: q.state.data};
+      }
     }
   }
-  return null;
+  return {diagnostic};
 })()
 """
 SELECT_PAGE = """
@@ -106,19 +127,47 @@ def _sample_ranks(ranked, limit):
 
 def _read(session, netuid, page):
     js = READ_PAGE.replace("NETUID", str(netuid)).replace("PAGE", str(page))
-    for _ in range(40):
-        state = session.sb.evaluate(js)
-        if isinstance(state, dict):
-            if state.get("status") == "error":
-                break
-            if state.get("status") == "success":
-                data = state.get("data")
-                if (isinstance(data, dict)
-                        and isinstance(data.get("data"), list)
-                        and str((data.get("pagination") or {}).get(
-                            "current_page")) == str(page)):
-                    return data
+    waited, limit = 0, 40
+    action = "none"
+    while waited < limit:
+        state = session.sb.evaluate(js) or {}
+        diag = state.get("diagnostic") or {}
+        if state.get("status") == "success":
+            data = state.get("data")
+            if (isinstance(data, dict) and isinstance(data.get("data"), list)
+                    and str((data.get("pagination") or {}).get(
+                        "current_page")) == str(page)):
+                return data
+        if (page == 1 and waited in (3, 7, 13, 21) and diag
+                and not diag.get("grid_present") and not diag.get(
+                    "query_found")):
+            # A server-rendered tab can accept a click before hydration and
+            # leave Transactions selected. Stop reselecting once the UI
+            # mounts the holder grid or subscribes to the holder query.
+            session.sb.evaluate(SELECT_HOLDERS)
+        ready_to_retry = waited >= 6 or state.get("status") == "error"
+        if (action == "none" and ready_to_retry
+                and diag.get("control_visible")
+                and not diag.get("widget_completed")):
+            action = "control_attempted"
+            try:
+                session.sb.click_with_offset("#cf-turnstile", 20, 32,
+                                             scroll=False)
+            except Exception:
+                action = "control_failed"
+            limit = max(limit, waited + 30)
+        elif state.get("status") == "error":
+            break
+        waited += 1
         time.sleep(.5)
+    verification = ("complete" if diag.get("widget_completed") else
+                    "pending" if diag.get("widget_present") else "absent")
+    print("SN%d holders page %d unavailable: status=%s, holder_grid=%s, "
+          "query=%s, cells=%s, verification=%s, control=%s, http=%s" % (
+              netuid, page, state.get("status", "missing"),
+              bool(diag.get("grid_present")), bool(diag.get("query_found")),
+              diag.get("cells", 0), verification, action,
+              diag.get("http_status")))
     return None
 
 
@@ -140,6 +189,7 @@ def fetch_holders(session, netuid, limit=6, pages=1):
                 break
             time.sleep(.5)
         else:
+            print("SN%d holders unavailable: no visible Holders tab" % netuid)
             return [], "unavailable"
         data = _read(session, netuid, 1)
         if not data:
@@ -173,7 +223,9 @@ def fetch_holders(session, netuid, limit=6, pages=1):
                 rows.extend(data["data"])
         fully_read = len(seen) >= last and len(rows) == int(paging[
             "total_items"])
-    except Exception:
+    except Exception as exc:
+        print("SN%d holders could not finish (%s)" % (netuid,
+                                                      type(exc).__name__))
         if not rows:
             return [], "unavailable"
     ranks, valid = _ranked(rows, netuid)

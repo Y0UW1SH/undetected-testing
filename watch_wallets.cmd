@@ -12,7 +12,7 @@ if /i "%~1"=="--help" goto :help
 if not exist "%WATCH_PY%" goto :need_setup
 "%WATCH_PY%" -c "import substrateinterface" >nul 2>nul
 if errorlevel 1 goto :need_setup
-"%WATCH_PY%" -m seo.tao_local_watch --cached-report --prompt %*
+"%WATCH_PY%" -m seo.tao_local_watch --refresh-snapshots --prompt %*
 exit /b %errorlevel%
 
 :setup
@@ -55,9 +55,11 @@ exit /b 0
 
 :help
 echo watch_wallets.cmd --setup                    Prepare an isolated local Python 3.13 watcher.
-echo watch_wallets.cmd                            Watch eligible followed wallets in the cached report.
+echo watch_wallets.cmd                            Watch wallets from the latest saved GitHub scan.
 echo watch_wallets.cmd --address ADDRESS          Also watch a specific coldkey.
 echo watch_wallets.cmd --address ADDRESS --once   Run one local poll.
+echo The watcher checks for a newer GitHub snapshot at startup and every six hours.
+echo If GitHub is unavailable it continues with the local snapshot.
 echo The key prompt hides input. Ctrl+C stops the foreground watcher.
 exit /b 0
 :need_setup

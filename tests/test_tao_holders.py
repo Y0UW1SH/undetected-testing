@@ -92,3 +92,68 @@ def test_jump_field_uses_visible_numeric_page_input():
     tab = JumpSession({1: state(1, 17, [row(A, 1)]),
                        13: state(13, 17, [row(E, 125)])})
     assert fetch_holders(tab, 23, limit=6, pages=2) == ([A, E], "partial")
+
+
+def test_pending_visible_verification_retried_once_before_reading(monkeypatch):
+    from seo.sources import tao_holders as h
+
+    class Verified(Session):
+        clicks = 0
+
+        def click_with_offset(self, selector, x, y, scroll):
+            assert (selector, x, y, scroll) == ("#cf-turnstile", 20, 32, False)
+            self.clicks += 1
+
+        def evaluate(self, js):
+            if js == h.SELECT_HOLDERS or self.clicks:
+                return super().evaluate(js)
+            return {"status": "pending", "diagnostic": {
+                "query_found": True, "grid_present": True,
+                "control_visible": True, "widget_completed": False}}
+
+    monkeypatch.setattr(h.time, "sleep", lambda _: None)
+    tab = Verified({1: state(1, 1, [row(A, 1)])})
+    assert h.fetch_holders(tab, 23, limit=2) == ([A], "partial")
+    assert tab.clicks == 1
+
+
+def test_unhydrated_first_click_is_retried_when_grid_never_activated(
+        monkeypatch):
+    from seo.sources import tao_holders as h
+
+    class Hydration(Session):
+        clicks = 0
+
+        def evaluate(self, js):
+            if js == h.SELECT_HOLDERS:
+                self.clicks += 1
+                return True
+            if self.clicks == 1:
+                return {"diagnostic": {"grid_present": False,
+                                       "query_found": False}}
+            return super().evaluate(js)
+
+    monkeypatch.setattr(h.time, "sleep", lambda _: None)
+    tab = Hydration({1: state(1, 1, [row(A, 1)])})
+    assert h.fetch_holders(tab, 23, limit=1) == ([A], "partial")
+    assert tab.clicks == 2
+
+
+def test_persistent_verification_has_diagnostic_not_empty_success(
+        monkeypatch, capsys):
+    from seo.sources import tao_holders as h
+
+    class Stalled(Session):
+        clicks = 0
+
+        def click_with_offset(self, *args, **kwargs):
+            self.clicks += 1
+
+    monkeypatch.setattr(h.time, "sleep", lambda _: None)
+    tab = Stalled({1: {"status": "pending", "diagnostic": {
+        "query_found": True, "grid_present": True,
+        "widget_present": True, "control_visible": True,
+        "widget_completed": False, "cells": 0}}})
+    assert h.fetch_holders(tab, 23) == ([], "unavailable")
+    assert tab.clicks == 1
+    assert "verification" in capsys.readouterr().out
