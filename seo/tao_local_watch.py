@@ -238,8 +238,8 @@ def block_events(height, records, watched):
                 move["dst_alpha"] = incoming[0]["alpha"]
                 move["dst_alpha_units"] = incoming[0]["alpha_units"]
                 used.update([outgoing[0]["id"], incoming[0]["id"]])
-        found.extend(r for r in records if r["id"] not in used
-                     and (r["src"] in watched or r["dst"] in watched))
+        found.extend(r for r in records if r["id"] not in used and (
+            watched is None or r["src"] in watched or r["dst"] in watched))
     return found
 
 
@@ -250,6 +250,7 @@ def _now():
 def poll(chain, old, addresses, max_blocks=40, new_events=None):
     addresses = sorted(set(addresses))
     feed = dict(old, source=SOURCE, addresses=addresses, checked_at=_now(),
+                head=None, lag_blocks=None,
                 poll_interval_seconds=INTERVAL, stale_after_seconds=660,
                 status="current")
     previous = old.get("last_scanned_block")
@@ -393,6 +394,7 @@ def _cached_discovery(cache, after=None):
             if when is not None and when >= cutoff:
                 files.append((when, int(folder.name), path))
     later_screens = set()
+    additions = {"buy": [], "sell": []}
     for _, _, path in sorted(files, reverse=True):
         try:
             stat = path.stat()
@@ -401,9 +403,16 @@ def _cached_discovery(cache, after=None):
         except (OSError, ValueError):
             continue
         if snapshot["mode"] == "discovery":
-            return dict(snapshot, later_screens=later_screens)
+            return dict(snapshot, later_screens=later_screens,
+                        holder_picks=additions)
+        if snapshot["mode"] == "holder_supplement":
+            for side in additions:
+                additions[side].extend(a for a in snapshot["picks"][side]
+                                       if a not in later_screens)
         later_screens.update(snapshot["blocked"])
-    return dict(later_screens=later_screens) if later_screens else None
+    if later_screens or any(additions.values()):
+        return dict(later_screens=later_screens, holder_picks=additions)
+    return None
 
 
 def _address_reasons(report, explicit, picks=None):
@@ -433,7 +442,8 @@ def _selection(report, explicit, previous=None, discovery=None):
     previous = previous or {}
     state = dict(discovery_at=previous.get("discovery_at"),
                  buy=list(previous.get("buy", [])),
-                 sell=list(previous.get("sell", [])))
+                 sell=list(previous.get("sell", [])),
+                 revoked=list(previous.get("revoked", [])))
     if not report:
         return _address_reasons({}, explicit, {}), state
     if report.get("mode", "discovery") == "discovery":
@@ -446,10 +456,17 @@ def _selection(report, explicit, previous=None, discovery=None):
     stamp = discovery.get("checked_at")
     newer = _report_time(stamp) > _report_time(state["discovery_at"])
     if "picks" in discovery and (not previous or newer):
-        state.update(discovery["picks"], discovery_at=stamp)
-    revoked = _screened(report) | set(discovery.get("later_screens", []))
+        state.update(discovery["picks"], discovery_at=stamp, revoked=[])
+    revoked = (set(state["revoked"]) | _screened(report)
+               | set(discovery.get("later_screens", [])))
+    state["revoked"] = sorted(revoked)
+    more = discovery.get("holder_picks", {})
+    supplement = report.get("mode") == "holder_supplement"
+    current = _timing_picks(report) if supplement else {}
     for side in ("buy", "sell"):
-        state[side] = [a for a in state[side] if a not in revoked]
+        candidates = state[side] + current.get(side, []) + more.get(side, [])
+        state[side] = [a for a in dict.fromkeys(candidates)
+                       if a not in revoked][:3]
     return _address_reasons(report, explicit, state), state
 
 
@@ -583,6 +600,7 @@ def _run(args):
                 except Exception:
                     feed = dict(feed, source=SOURCE, status="read_error",
                                 checked_at=_now(), addresses=addresses,
+                                head=None, lag_blocks=None,
                                 events=feed.get("events", []),
                                 poll_interval_seconds=INTERVAL,
                                 stale_after_seconds=660)
@@ -601,7 +619,9 @@ def _run(args):
                 error = feed["status"] == "read_error"
                 if args.once:
                     return int(error)
-                if error and chain is not None:
+                # The public gateway can drop WebSockets during a five-minute
+                # idle period. Reconnect per poll and retain the block cursor.
+                if chain is not None:
                     with suppress(Exception):
                         chain.close()
                     chain = None

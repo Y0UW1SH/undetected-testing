@@ -246,6 +246,19 @@ def test_hex_alias_cannot_bypass_a_public_screen_or_use_two_slots():
     assert picked[canonical] == ["followed", "buy_timing"]
 
 
+def test_qualified_holder_supplements_existing_discovery_watch():
+    from seo.tao_local_watch import _selection
+    discovery = dict(mode="discovery", checked_at="2026-11-04T00:00:00Z",
+                     performance={"rankings": {"buy": [A]}})
+    _, state = _selection(discovery, [])
+    report = dict(mode="holder_supplement", checked_at="2026-11-05T00:00:00Z",
+                  performance={"rankings": {"buy": [B], "sell": [B]}})
+    reasons, state = _selection(report, [], state)
+    assert reasons == {A: ["buy_timing"], B: ["buy_timing", "sell_timing"]}
+    reasons, _ = _selection(dict(mode="watchlist"), [], state)
+    assert B in reasons
+
+
 def test_same_wallet_hotkey_switch_is_one_movement_not_two_alerts():
     from seo.tao_local_watch import block_events
     other_hot = "5" + "Z" * 47

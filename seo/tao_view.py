@@ -278,6 +278,15 @@ def _archive(html, data, source, cache, output_dir=None):
         return html
     nav = '<details><summary>Saved snapshots</summary><ul>' + "".join(
         link for _, _, link in sorted(links, reverse=True)) + '</ul></details>'
+    network = (cache / "network.html").resolve()
+    if network.is_file():
+        try:
+            url = quote(Path(os.path.relpath(network, output_dir or cache))
+                        .as_posix())
+        except ValueError:
+            url = network.as_uri()
+        nav += (f'<p><a href="{escape(url)}">Explore wallet transfers '
+                'and census coverage</a></p>')
     return html.replace("</header>", nav + "</header>", 1)
 
 

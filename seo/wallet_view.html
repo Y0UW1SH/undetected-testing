@@ -26,6 +26,7 @@ td button{padding:3px 7px;font-family:ui-monospace,monospace;font-size:14px}
 <nav aria-label="View"><button id="bwallet" aria-pressed="true">Wallets</button><button id="bfeed" aria-pressed="false">Watchlist activity</button></nav>
 <section id="list"><h2>Wallet results</h2><div class="controls">
 <label>Show<select id="board"><option value="all">Inspected wallets</option><option value="buy">Buys before rises</option><option value="sell">Sales before drops</option><option value="open">Open gains with verified cost</option><option value="partial">Open gains with partial cost</option><option value="profit">Realized winners</option><option value="profit_partial">Sales with partial cost</option></select></label>
+<label id="moveControl" hidden>Price move<select id="move"><option id="scanMove" value="scan">≥5% (scan)</option><option value="2">≥2%</option><option id="anyMove" value="any">Any rise/drop</option></select></label>
 <label>Find wallet<input id="search" type="search" placeholder="Wallet address or prefix"></label></div>
 <p id="rule"></p><div id="results"></div><div id="detail" aria-live="polite"></div></section>
 <section id="feed" hidden></section>
@@ -48,7 +49,88 @@ function grid(target,headers,rows,none){if(!rows.length){add(target,'p',none).cl
 let box=add(target,'div');box.className='scroll';let t=add(box,'table'),r=add(add(t,'thead'),'tr');headers.forEach(h=>add(r,'th',h));
 let body=add(t,'tbody');for(let vals of rows){r=add(body,'tr');for(let v of vals){let td=add(r,'td');if(v instanceof Node)td.append(v);else td.textContent=v??'Unknown'}}}
 function acct(a){if(!a)return 'Unknown';if(!wallets.has(a))return anchor('account',a);let b=el('button',short(a));b.title=a;b.onclick=()=>show(a,true);return b}
-const hits=(w,k)=>{let t=w.timing?.[k];return t?t.favorable+'/'+t.evaluated:'—'};
+const evidenceBySide=new Map();
+let activeComparison=null, detailAddress=null;
+
+function inspectMatches(side){
+  if(evidenceBySide.has(side))return evidenceBySide.get(side);
+  const proof=R.timing_evidence;
+  function unavailable(reason){const result={reason};evidenceBySide.set(side,result);return result}
+  if(!proof||proof.match_details_omitted!==0||!Array.isArray(proof.matches)
+     ||proof.matched_trades!==proof.matches.length){
+    return unavailable('The report does not contain every matched trade.');
+  }
+  if(Date.parse(proof.as_of)!==Date.parse(R.checked_at)){
+    return unavailable('The evidence and the scan have different timestamps.');
+  }
+  if(!Number.isInteger(P.settings.min_timing)||P.settings.min_timing<1){
+    return unavailable('This report has no timing sample settings.');
+  }
+  const trades=new Map(), ids=new Set();
+  for(const m of proof.matches){
+    if(m.kind!==side)continue;
+    const fill=m.fill_price_tao, quote=m.price_tao;
+    const when=Date.parse(m.trade_time), after=Date.parse(m.quote_time)-when;
+    if(!wallets.has(m.address)||!m.id||ids.has(m.id)
+       ||!Number.isFinite(fill)||fill<=0||!Number.isFinite(quote)||quote<=0
+       ||!Number.isFinite(after)||after<24*3600000||after>30*3600000){
+      return unavailable('Some trade or quote details cannot be verified.');
+    }
+    ids.add(m.id);
+    if(!trades.has(m.address))trades.set(m.address,[]);
+    // Use the actual prices. The report rounds its displayed percentage.
+    const flat=Math.abs(fill-quote)<=1e-12*Math.max(fill,quote);
+    const move=flat?0:(side==='buy'?100:-100)*(quote/fill-1);
+    trades.get(m.address).push({move,day:new Date(when).toISOString().slice(0,10)});
+  }
+  for(const w of wallets.values()){
+    const t=w.timing?.[side], count=trades.get(w.address)?.length||0;
+    if(!t||t.evaluated!==count||!Number.isInteger(t.mature_trades)||t.mature_trades<count){
+      return unavailable('Match counts differ from the saved wallet timing totals.');
+    }
+    if(count&&(!Array.isArray(w.screens)||!Array.isArray(w.evidence_gaps)
+       ||typeof w.snapshot_recent!=='boolean')){
+      return unavailable('Wallet screening or freshness information is missing.');
+    }
+  }
+  const evidence={trades};
+  evidenceBySide.set(side,evidence);
+  return evidence;
+}
+
+function compareTiming(side,threshold,trades){
+  const scores=new Map(),ranked=[];
+  for(const w of wallets.values()){
+    const saved=w.timing[side], rows=trades.get(w.address)||[];
+    const hits=rows.filter(({move})=>move>0&&(move>=threshold
+      ||Math.abs(move-threshold)<=1e-9*Math.max(move,threshold)));
+    const score={...saved,favorable:hits.length,rate:rows.length?hits.length/rows.length:null,
+      favorable_days:new Set(hits.map(r=>r.day)).size};
+    scores.set(w.address,score);
+    if(!clean(w)||!w.snapshot_recent||!Array.isArray(w.evidence_gaps)
+       ||w.evidence_gaps.some(g=>g!=='transactions_partial'))continue;
+    if(rows.length>=Math.max(8,P.settings.min_timing)&&rows.length>=saved.mature_trades/2
+       &&score.rate>.5&&score.favorable_days>=2)ranked.push(w.address);
+  }
+  ranked.sort((a,b)=>scores.get(b).rate-scores.get(a).rate||
+    scores.get(b).evaluated-scores.get(a).evaluated||(a<b?-1:a>b?1:0));
+  return {side,threshold,scores,ranked};
+}
+
+function timingScore(w,side){
+  return activeComparison?.side===side?activeComparison.scores.get(w.address):w.timing?.[side];
+}
+function hits(w,side){
+  const t=timingScore(w,side);
+  if(!t||!t.evaluated)return '—';
+  return num(100*t.favorable/t.evaluated,1)+'% ('+t.favorable+'/'+t.evaluated+')';
+}
+function thresholdLabel(side){
+  if(activeComparison?.side===side){
+    return activeComparison.threshold?'≥'+activeComparison.threshold+'%':(side==='buy'?'any rise':'any drop');
+  }
+  return '≥'+P.settings.move_pct+'%';
+}
 const rules={all:'Sorted by unrealized gain on traceable units. Exchange-like accounts are hidden. An unknown-cost portion can change a wallet’s total profit.',
 buy:'A buy counts when the subnet rose at least '+P.settings.move_pct+'% at the first quote 24–30 hours after the trade. Missing quotes do not count as misses.',
 sell:'A sale counts when the subnet fell at least '+P.settings.move_pct+'% at the first quote 24–30 hours after the trade. A transfer is not a sale.',
@@ -57,12 +139,33 @@ partial:'Positive open gains visible on traceable units. These do not establish 
 profit:'Repeat wins on fully priced sales. A positive subtotal on incomplete sales is not enough to qualify.',
 profit_partial:'Positive realized gains on the known portion of sales. The total result can still be a loss.'};
 function listing(){let key=$('board').value,q=$('search').value.trim().toLowerCase();let ranked=P.rankings[key]||[];
+let rule=rules[key];
+const timingBoard=key==='buy'||key==='sell';
+$('moveControl').hidden=!timingBoard;
+activeComparison=null;
+if(timingBoard){
+  const select=$('move'), evidence=inspectMatches(key);
+  $('scanMove').textContent='≥'+P.settings.move_pct+'% (scan)';
+  $('anyMove').textContent=key==='buy'?'Any rise':'Any drop';
+  select.disabled=Boolean(evidence.reason);
+  if(evidence.reason){
+    select.value='scan';
+    rule+=' Showing the saved scan threshold. '+evidence.reason;
+  }else if(select.value!=='scan'){
+    const threshold=select.value==='any'?0:2;
+    activeComparison=compareTiming(key,threshold,evidence.trades);
+    ranked=activeComparison.ranked;
+    rule='Exploratory price direction 24–30 hours after each fill. Requires a majority of hits on at least two UTC dates, '
+      +Math.max(8,P.settings.min_timing)+' evaluated trades and quotes for at least half of mature trades. '
+      +'P/L and watchlists use the saved scan.';
+  }
+}
 let list=key==='all'?[...wallets.values()].filter(inspected).sort((a,b)=>(openKnown(b)??-Infinity)-(openKnown(a)??-Infinity)):
 key==='partial'?(P.rankings.partial_open||P.rankings.open_partial||[]).map(a=>wallets.get(a)):ranked.map(a=>wallets.get(a));
-list=list.filter(w=>w&&clean(w)&&w.address.toLowerCase().includes(q));$('results').replaceChildren();$('rule').textContent=rules[key];
-grid($('results'),['Wallet','Realized on known units · TAO','Open on known units · TAO','Whole-wallet P/L · TAO','Buys hit / evaluated','Sales hit / evaluated'],
+list=list.filter(w=>w&&clean(w)&&w.address.toLowerCase().includes(q));$('results').replaceChildren();$('rule').textContent=rule;
+grid($('results'),['Wallet','Realized on known units · TAO','Open on known units · TAO','Whole-wallet P/L · TAO','Buy hit rate · '+thresholdLabel('buy'),'Sell hit rate · '+thresholdLabel('sell')],
 list.map(w=>[acct(w.address),pn(signedKnown(w)),pn(openKnown(w)),pn(w.gross_total_pnl_tao),hits(w,'buy'),hits(w,'sell')]),q?'No matching wallet.':'No wallets meet this filter in this run.')}
-function show(a,focus){let w=wallets.get(a);if(!w)return;toggle(false);const s=$('detail');s.replaceChildren();add(s,'h2','Wallet detail');
+function show(a,focus){let w=wallets.get(a);if(!w)return;detailAddress=a;toggle(false);const s=$('detail');s.replaceChildren();add(s,'h2','Wallet detail');
 const label=add(s,'div');label.className='address';label.append(anchor('account',a));
 let reasons=[...(w.screens||[]),...(w.evidence_gaps||[])].map(t=>t.replaceAll('_',' '));
 add(s,'p',[watched.has(a)?'Watched':'Not on watchlist','Account as of '+time(w.account_as_of),...reasons].join(' · '));
@@ -73,7 +176,12 @@ if(w.open){const o=w.open;add(s,'p','Open gain on traceable units: '+num(o.known
 if(w.unpriced_sales)add(s,'p','Sale proceeds with unresolved cost: '+num(w.unresolved_sale_proceeds_tao)+' TAO.');
 grid(s,['Subnet','Held α','Known α','Known entry · TAO/α','Mark · TAO/α','Estimated-cost α','Unknown-cost α','Realized on known · TAO','Open on known · TAO'],
 (w.positions||[]).map(p=>['SN'+p.netuid,num(p.alpha,3),num(p.known_alpha,3),num(p.known_buy_price_tao,9),num(p.current_quote?p.price_tao:null,9),num(p.probable_alpha,3),num(p.unknown_alpha,3),pn(signedKnown(p)),pn(p.known_unrealized_tao)]),'No positions or sales observed.');
-add(s,'h3','Trade timing');grid(s,['Side','Favorable / evaluated','Mature trades','Favorable days','Mean directional move'],['buy','sell'].map(k=>{let t=w.timing[k];return[k,hits(w,k),t.mature_trades,t.favorable_days,t.mean_directional_move_pct==null?'Unknown':num(t.mean_directional_move_pct)+'%']}),'No timed trades.');
+add(s,'h3','Trade timing');
+if(activeComparison){
+  const side=activeComparison.side;
+  add(s,'p',side+' timing uses '+thresholdLabel(side)+' in this comparison. The other side uses the saved ≥'+P.settings.move_pct+'% threshold.');
+}
+grid(s,['Side','Hit rate (hits/evaluated)','Mature trades','Favorable days','Mean directional move'],['buy','sell'].map(k=>{let t=timingScore(w,k);return[k,hits(w,k),t.mature_trades,t.favorable_days,t.mean_directional_move_pct==null?'Unknown':num(t.mean_directional_move_pct)+'%']}),'No timed trades.');
 let proof=(R.timing_evidence?.matches||R.historical_prices?.matches||[]).filter(x=>x.address===a);
 let journal=add(s,'details');add(journal,'summary','Price evidence for individual trades');
 grid(journal,['Trade time','Side','Subnet','Execution · TAO/α','Quote time','Later · TAO/α','Favorable move %','Extrinsic'],proof.map(x=>[time(x.trade_time),x.kind,'SN'+x.netuid,num(x.fill_price_tao,9),time(x.quote_time),num(x.price_tao,9),pn(x.favorable_move_pct),anchor('extrinsic',x.extrinsic)]),'No qualifying forward quote for this wallet in the saved evidence.');
@@ -117,6 +225,7 @@ function toggle(f){
   }
 }
 $('stamp').textContent='Taostats snapshot · '+time(R.checked_at)+' · '+Object.keys(R.coverage||{}).length+' wallets inspected · '+(R.events||[]).length+' stored movements';
-$('search').oninput=listing;$('board').onchange=listing;$('bfeed').onclick=()=>toggle(true);$('bwallet').onclick=()=>toggle(false);listing();feed();
+function changeTimingView(){listing();if(detailAddress)show(detailAddress,false)}
+$('search').oninput=listing;$('board').onchange=changeTimingView;$('move').onchange=changeTimingView;$('bfeed').onclick=()=>toggle(true);$('bwallet').onclick=()=>toggle(false);listing();feed();
 if(location.hash==='#activity')toggle(true);
 </script></main></body></html>
