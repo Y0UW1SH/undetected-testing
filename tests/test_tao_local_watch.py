@@ -159,6 +159,106 @@ def test_initial_budget_stop_keeps_oldest_unscanned_height():
         "finney:51:0", "finney:50:3", "finney:50:0"]
 
 
+def test_retry_resumes_the_failed_block_and_preserves_cycle_block_limit(
+        monkeypatch):
+    from seo import tao_local_watch as watch
+    monkeypatch.setattr(watch.time, "sleep", lambda _: None)
+    clients = []
+
+    def connect(url, meter):
+        broken = not clients
+
+        class Flaky(Chain):
+            head = 54
+
+            @property
+            def requests(self):
+                return meter.calls
+
+            def get_events(self, block_hash):
+                meter.take()
+                if broken and block_hash == "hash-52":
+                    raise ConnectionResetError("private-endpoint-example")
+                return super().get_events(block_hash)
+
+        clients.append(Flaky())
+        return clients[-1]
+
+    monkeypatch.setattr(watch, "_connect", connect)
+    notices = []
+    feed = watch._poll_cycle("test", dict(last_scanned_block=50), [A], 3,
+                             180, notices)
+    assert feed["status"] == "catching_up" and feed["last_scanned_block"] == 53
+    assert [c.blocks for c in clients] == [[51], [52, 53]]
+    assert (feed["rpc_attempts"], feed["rpc_calls"]) == (2, 4)
+    assert [e["id"] for e in notices] == ["finney:51:0"]
+    assert feed["rpc_retry"] == {"stage": "block_events", "type": "connection"}
+    assert "private-endpoint-example" not in json.dumps(feed)
+
+
+def test_failed_connections_share_the_cap_without_leaking_the_endpoint(
+        monkeypatch):
+    from seo import tao_local_watch as watch
+    monkeypatch.setattr(watch.time, "sleep", lambda _: None)
+    calls = []
+
+    def connect(url, meter):
+        calls.append(meter.calls)
+        for _ in range(7):
+            meter.take()
+        raise TimeoutError("private-endpoint-example")
+
+    monkeypatch.setattr(watch, "_connect", connect)
+    old = dict(rpc_calls=99, last_scanned_block=49)
+    feed = watch._poll_cycle("test", old, [A], 2, 10, [])
+    assert calls == [0, 7] and feed["rpc_calls"] == 10
+    assert feed["status"] == "rpc_budget" and feed["last_scanned_block"] == 49
+    assert feed["rpc_retry"] == {"stage": "connect", "type": "timeout"}
+    assert "private-endpoint-example" not in json.dumps(feed)
+
+
+def test_failure_before_an_rpc_reports_zero_current_calls(monkeypatch):
+    from seo import tao_local_watch as watch
+    monkeypatch.setattr(watch.time, "sleep", lambda _: None)
+
+    def connect(url, meter):
+        raise ConnectionError("private-endpoint-example")
+
+    monkeypatch.setattr(watch, "_connect", connect)
+    feed = watch._poll_cycle("test", dict(rpc_calls=177), [A], 1, 180, [])
+    assert feed["status"] == "read_error"
+    assert (feed["rpc_attempts"], feed["rpc_calls"]) == (2, 0)
+    assert feed["rpc_error"] == {"stage": "connect", "type": "connection"}
+    assert "private-endpoint-example" not in json.dumps(feed)
+
+
+def test_client_setup_failure_meters_initial_rpc_and_closes_transport(
+        monkeypatch):
+    import sys
+
+    from seo import tao_local_watch as watch
+    monkeypatch.setattr(watch.time, "sleep", lambda _: None)
+    closed = []
+
+    class FailingClient:
+        def __init__(self, url, **options):
+            self.rpc_request("system_chain", [])
+            raise ConnectionError(url)
+
+        def rpc_request(self, method, params, callback):
+            return {"result": "Finney"}
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setitem(sys.modules, "substrateinterface", SimpleNamespace(
+        SubstrateInterface=FailingClient))
+    feed = watch._poll_cycle("private-endpoint-example", {}, [A], 1, 180, [])
+    assert (feed["rpc_calls"], feed["rpc_attempts"]) == (2, 2)
+    assert len(closed) == 2
+    assert "private-endpoint-example" not in json.dumps(feed)
+
+
 def test_public_screens_apply_only_to_report_following():
     from seo.tao_local_watch import _addresses
     report = {"following": [A, B], "performance": {"wallets": [

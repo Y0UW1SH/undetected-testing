@@ -96,6 +96,64 @@ def test_private_feed_explicit_and_locked(tmp_path):
     assert not any(name.endswith(".lock") for name in members(archive))
 
 
+@pytest.mark.parametrize("fields", [
+    {},
+    {"rpc_attempts": 0},
+    {"rpc_attempts": 1, "rpc_error": {"stage": "decode_events",
+                                      "type": "invalid_data"}},
+    {"rpc_attempts": 2, "rpc_retry": {"stage": "block_events",
+                                      "type": "connection"},
+     "rpc_error": {"stage": "connect", "type": "timeout"}},
+])
+def test_private_watch_versions_and_retry_round_trip(tmp_path, fields):
+    private = feed(tmp_path)
+    data = dict(json.loads(private.read_text()), **fields)
+    private.write_text(json.dumps(data))
+    archive = tmp_path / "move.zip"
+    portable.export_bundle(tmp_path, archive, include_local_feed=True)
+    restored = tmp_path / "restored"
+    portable.import_bundle(restored, archive, include_local_feed=True)
+    assert json.loads((restored / FEED).read_text()) == data
+
+
+@pytest.mark.parametrize("fields", [
+    {"rpc_attempts": True}, {"rpc_attempts": "2"}, {"rpc_attempts": 3},
+    {"rpc_attempts": -1}, {"rpc_attempts": 1.0},
+    {"rpc_retry": {"stage": "wss://example.invalid", "type": "connection"}},
+    {"rpc_error": {"stage": "connect", "type": "PRIVATE_TEST_SENTINEL"}},
+    {"rpc_error": {"stage": "connect", "type": "connection", "message": "x"}},
+    {"rpc_error": {"stage": "connect"}}, {"rpc_retry": None},
+    {"rpc_error": {"stage": ["connect"], "type": "connection"}},
+])
+def test_private_feed_rejects_untrusted_rpc_diagnostics(tmp_path, fields):
+    private = feed(tmp_path)
+    data = dict(json.loads(private.read_text()), **fields)
+    private.write_text(json.dumps(data))
+    archive = tmp_path / "move.zip"
+    with pytest.raises(ValueError, match="watcher feed"):
+        portable.export_bundle(tmp_path, archive, include_local_feed=True)
+    assert not archive.exists()
+
+
+def test_restore_rejects_untrusted_diagnostic_with_valid_checksum(tmp_path):
+    private = feed(tmp_path)
+    archive = tmp_path / "move.zip"
+    portable.export_bundle(tmp_path, archive, include_local_feed=True)
+    files = members(archive)
+    data = json.loads(private.read_text())
+    data.update(rpc_error={"stage": "connect", "type": "unexpected text"})
+    files[FEED] = json.dumps(data).encode()
+    manifest = json.loads(files["manifest.json"])
+    manifest["files"][FEED] = dict(sha256=hashlib.sha256(files[FEED])
+                                   .hexdigest(), size=len(files[FEED]))
+    files["manifest.json"] = json.dumps(manifest)
+    repack(archive, files)
+    restored = tmp_path / "restored"
+    with pytest.raises(ValueError, match="watcher feed RPC diagnostic"):
+        portable.import_bundle(restored, archive, include_local_feed=True)
+    assert not (restored / FEED).exists()
+
+
 def test_committed_wal_only_and_detect_changed_db(tmp_path):
     src = tmp_path / "old"
     _, db = pair(src)

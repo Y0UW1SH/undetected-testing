@@ -23,6 +23,7 @@ HOST = "api-bittensor-mainnet.n.dwellir.com"
 INTERVAL = 300
 SNAPSHOT_INTERVAL = 6 * 60 * 60
 RPC_PER_SECOND = 10
+MAX_RPC_PER_POLL = 180
 KEEP = 500
 SOURCE = "local-finney-events-v1"
 ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -35,6 +36,39 @@ class WatchError(Exception):
 
 class RequestBudget(Exception):
     pass
+
+
+class _RequestMeter:
+    def __init__(self, limit):
+        self.limit = limit
+        self.calls = 0
+        self.last_call = None
+
+    def take(self):
+        if self.calls >= self.limit:
+            raise RequestBudget
+        if self.last_call is not None:
+            wait = self.last_call + 1 / RPC_PER_SECOND - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+        self.last_call = time.monotonic()
+        self.calls += 1
+
+
+def _failure(stage, exc):
+    # Remote exceptions can embed the endpoint. Emit only fixed labels.
+    name = type(exc).__name__
+    if isinstance(exc, TimeoutError) or name == "WebSocketTimeoutException":
+        kind = "timeout"
+    elif (isinstance(exc, OSError)
+          or name in ("WebSocketConnectionClosedException",
+                      "WebSocketBadStatusException")):
+        kind = "connection"
+    elif isinstance(exc, (TypeError, ValueError, KeyError)):
+        kind = "invalid_data"
+    else:
+        kind = "rpc_error"
+    return dict(stage=stage, type=kind)
 
 
 def _endpoint(prompt):
@@ -73,18 +107,26 @@ def _connect(url, budget):
                          "watch_wallets.cmd --setup or pip install "
                          "substrate-interface==1.8.1.")
 
+    meter = (budget if isinstance(budget, _RequestMeter)
+             else _RequestMeter(budget))
+
     class MeteredClient(SubstrateInterface):
-        requests = 0
-        last_request = 0.
+        def __init__(self, **options):
+            try:
+                super().__init__(**options)
+            except BaseException:
+                # A failed constructor cannot return its partially opened
+                # transport to the caller for the normal finally/close.
+                with suppress(Exception):
+                    self.close()
+                raise
+
+        @property
+        def requests(self):
+            return meter.calls
 
         def rpc_request(self, method, params, result_handler=None):
-            if self.requests >= budget:
-                raise RequestBudget
-            wait = self.last_request + 1 / RPC_PER_SECOND - time.monotonic()
-            if wait > 0:
-                time.sleep(wait)
-            self.last_request = time.monotonic()
-            self.requests += 1
+            meter.take()
             return super().rpc_request(method, params, result_handler)
 
         def get_events(self, block_hash):
@@ -257,9 +299,13 @@ def poll(chain, old, addresses, max_blocks=40, new_events=None):
     events = [e for e in old.get("events", [])
               if e["src"] in addresses or e["dst"] in addresses]
     feed["events"] = events
+    feed.pop("rpc_error", None)
+    stage = "genesis"
     try:
         genesis = chain.get_block_hash(0)
+        stage = "finalized_head"
         finalized = chain.get_chain_finalised_head()
+        stage = "head_height"
         head = chain.get_block_number(finalized)
         if not genesis or not finalized or not isinstance(head, int):
             raise ValueError("finalized head unavailable")
@@ -275,13 +321,17 @@ def poll(chain, old, addresses, max_blocks=40, new_events=None):
         feed["address_coverage_start"] = {
             a: starts.get(a, start) for a in addresses}
         for height in range(start, min(head + 1, start + max_blocks)):
+            stage = "block_hash"
             block_hash = finalized if height == head else (
                 chain.get_block_hash(height))
             if not block_hash:
                 raise ValueError("finalized block unavailable")
-            matches = block_events(height, chain.get_events(block_hash),
-                                   addresses)
+            stage = "block_events"
+            records = chain.get_events(block_hash)
+            stage = "decode_events"
+            matches = block_events(height, records, addresses)
             if matches:
+                stage = "block_timestamp"
                 ms = chain.query("Timestamp", "Now",
                                  block_hash=block_hash).value
                 when = datetime.fromtimestamp(int(ms) / 1000,
@@ -298,9 +348,10 @@ def poll(chain, old, addresses, max_blocks=40, new_events=None):
         feed["status"] = "rpc_budget"
     except WatchError:
         raise
-    except Exception:
+    except Exception as exc:
         # RPC exceptions may contain the URL including its private key.
         feed["status"] = "read_error"
+        feed["rpc_error"] = _failure(stage, exc)
     events.sort(key=lambda e: (e["block_number"], e["event_index"]),
                 reverse=True)
     feed["discarded_events"] = old.get("discarded_events", 0) + max(
@@ -311,6 +362,57 @@ def poll(chain, old, addresses, max_blocks=40, new_events=None):
     feed["lag_blocks"] = (feed["head"] - previous if previous is not None
                           and feed.get("head") is not None else None)
     feed["rpc_calls"] = chain.requests
+    return feed
+
+
+def _poll_cycle(url, old, addresses, max_blocks, rpc_limit, notices):
+    """At most two connections share one block allowance and RPC meter."""
+    meter = _RequestMeter(min(rpc_limit, MAX_RPC_PER_POLL))
+    feed = dict(old, source=SOURCE, status="read_error", rpc_calls=0,
+                checked_at=_now(), addresses=addresses, head=None,
+                lag_blocks=None, poll_interval_seconds=INTERVAL,
+                stale_after_seconds=660,
+                events=[e for e in old.get("events", [])
+                        if e["src"] in addresses or e["dst"] in addresses])
+    feed.pop("rpc_retry", None)
+    feed.pop("rpc_error", None)
+    remaining = max_blocks
+    for attempt in (1, 2):
+        previous = feed.get("last_scanned_block")
+        chain = None
+        try:
+            chain = _connect(url, meter)
+            feed = poll(chain, feed, addresses, remaining, notices)
+        except WatchError:
+            raise
+        except RequestBudget:
+            feed.pop("rpc_error", None)
+            feed["status"] = "rpc_budget"
+        except Exception as exc:
+            stage = "connect" if chain is None else "poll"
+            feed.update(status="read_error", head=None, lag_blocks=None,
+                        rpc_error=_failure(stage, exc))
+        finally:
+            if chain is not None:
+                with suppress(Exception):
+                    chain.close()
+        feed.update(rpc_calls=meter.calls, rpc_attempts=attempt)
+        if feed["status"] != "read_error" or attempt == 2:
+            break
+        error = feed["rpc_error"]
+        if (meter.calls >= meter.limit or error["stage"] == "decode_events"
+                or error["stage"] == "block_timestamp"
+                and error["type"] == "invalid_data"):
+            break
+        checkpoint = feed.get("last_scanned_block")
+        if checkpoint is not None:
+            start = (previous + 1 if previous is not None
+                     else feed["coverage_start"])
+            remaining -= max(0, checkpoint - start + 1)
+        if remaining <= 0:
+            break
+        feed["rpc_retry"] = error.copy()
+        time.sleep(1.)
     return feed
 
 
@@ -553,7 +655,6 @@ def _run(args):
         # Remote errors/log lines can contain the key-bearing endpoint.
         level = logging.root.manager.disable
         logging.disable(logging.CRITICAL)
-        chain = None
         try:
             while True:
                 start = time.monotonic()
@@ -574,36 +675,21 @@ def _run(args):
                 reasons, timing = _selection(report, args.address, previous,
                                              discovery)
                 addresses = sorted(reasons)
-                try:
-                    if addresses:
-                        if chain is None:
-                            if url is None:
-                                url = _endpoint(args.prompt)
-                            chain = _connect(url, args.rpc_limit)
-                        else:
-                            chain.requests = 0
-                        feed = poll(chain, feed, addresses, args.max_blocks,
-                                    notices)
-                    else:
-                        if chain is not None:
-                            with suppress(Exception):
-                                chain.close()
-                            chain = None
-                        feed = dict(feed, source=SOURCE, status="no_wallets",
-                                    checked_at=_now(), addresses=[], events=[],
-                                    address_coverage_start={}, rpc_calls=0,
-                                    retained_events=0, lag_blocks=None,
-                                    poll_interval_seconds=INTERVAL,
-                                    stale_after_seconds=660)
-                except WatchError:
-                    raise
-                except Exception:
-                    feed = dict(feed, source=SOURCE, status="read_error",
-                                checked_at=_now(), addresses=addresses,
+                if addresses:
+                    if url is None:
+                        url = _endpoint(args.prompt)
+                    feed = _poll_cycle(url, feed, addresses, args.max_blocks,
+                                       args.rpc_limit, notices)
+                else:
+                    feed = dict(feed, source=SOURCE, status="no_wallets",
+                                checked_at=_now(), addresses=[], events=[],
+                                address_coverage_start={}, rpc_calls=0,
+                                rpc_attempts=0, retained_events=0,
                                 head=None, lag_blocks=None,
-                                events=feed.get("events", []),
                                 poll_interval_seconds=INTERVAL,
                                 stale_after_seconds=660)
+                    feed.pop("rpc_retry", None)
+                    feed.pop("rpc_error", None)
                 feed["rpc_limit"] = args.rpc_limit
                 feed["rpc_rate_limit"] = RPC_PER_SECOND
                 feed["selection_reasons"] = reasons
@@ -611,6 +697,14 @@ def _run(args):
                 _persist(args, feed, report)
                 for row in notices:
                     print(_notice(row), flush=True)
+                if feed.get("rpc_retry"):
+                    print("Retried RPC after %s at %s." % (
+                        feed["rpc_retry"]["type"], feed["rpc_retry"]["stage"]),
+                        flush=True)
+                if feed.get("rpc_error"):
+                    print("RPC read failed: %s at %s." % (
+                        feed["rpc_error"]["type"], feed["rpc_error"]["stage"]),
+                        flush=True)
                 print("Local watcher %s. Finalized checkpoint %s, lag %s, "
                       "RPC requests %s/%d." % (
                           feed["status"], feed.get("last_scanned_block"),
@@ -619,12 +713,6 @@ def _run(args):
                 error = feed["status"] == "read_error"
                 if args.once:
                     return int(error)
-                # The public gateway can drop WebSockets during a five-minute
-                # idle period. Reconnect per poll and retain the block cursor.
-                if chain is not None:
-                    with suppress(Exception):
-                        chain.close()
-                    chain = None
                 time.sleep(max(0., INTERVAL - (time.monotonic() - start)))
         except KeyboardInterrupt:
             if feed:
@@ -632,9 +720,6 @@ def _run(args):
                 _persist(args, feed, report)
             return 130
         finally:
-            if chain is not None:
-                with suppress(Exception):
-                    chain.close()
             logging.disable(level)
 
 
@@ -652,7 +737,7 @@ def main(argv=None):
     p.add_argument("--view", type=Path,
                    default=Path("github_out/wallets.html"))
     p.add_argument("--max-blocks", type=int, default=40)
-    p.add_argument("--rpc-limit", type=int, default=180,
+    p.add_argument("--rpc-limit", type=int, default=MAX_RPC_PER_POLL,
                    help="maximum RPC requests per five-minute poll")
     p.add_argument("--once", action="store_true", help="run one poll and exit")
     p.add_argument("--prompt", action="store_true",
@@ -663,8 +748,9 @@ def main(argv=None):
     if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
         print("The Dwellir watcher runs only on a local PC.", file=sys.stderr)
         return 2
-    if not 1 <= args.max_blocks <= 200 or not 10 <= args.rpc_limit <= 300:
-        p.error("use 1-200 blocks and 10-300 requests per poll")
+    if (not 1 <= args.max_blocks <= 200
+            or not 10 <= args.rpc_limit <= MAX_RPC_PER_POLL):
+        p.error("use 1-200 blocks and 10-180 requests per poll")
     try:
         return _run(args)
     except WatchError as e:

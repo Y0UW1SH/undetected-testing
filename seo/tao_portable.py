@@ -110,7 +110,8 @@ def _feed(path):
                "coverage_start", "address_coverage_start", "events",
                "discarded_events", "retained_events", "last_scanned_block",
                "lag_blocks", "rpc_calls", "rpc_limit", "rpc_rate_limit",
-               "selection_reasons", "timing_selection", "snapshot_refresh"}
+               "selection_reasons", "timing_selection", "snapshot_refresh",
+               "rpc_attempts", "rpc_retry", "rpc_error"}
     event_fields = {"id", "block_number", "event_index", "extrinsic",
                     "event_name", "kind", "src", "dst", "hotkey",
                     "dst_hotkey", "netuid", "dst_netuid", "tao", "tao_rao",
@@ -129,6 +130,20 @@ def _feed(path):
             or set(data.get("snapshot_refresh", {}))
             - {"checked_at", "status"}):
         raise ValueError("Unexpected local watcher feed schema")
+    attempts = data.get("rpc_attempts", 0)
+    if type(attempts) is not int or not 0 <= attempts <= 2:
+        raise ValueError("Invalid watcher feed RPC attempt count")
+    stages = ("genesis", "finalized_head", "head_height", "block_hash",
+              "block_events", "decode_events", "block_timestamp", "connect",
+              "poll")
+    types = ("timeout", "connection", "invalid_data", "rpc_error")
+    for key in ("rpc_error", "rpc_retry"):
+        if key in data:
+            error = data[key]
+            if (not isinstance(error, dict) or set(error) != {"stage", "type"}
+                    or error["stage"] not in stages or error["type"]
+                    not in types):
+                raise ValueError("Invalid watcher feed RPC diagnostic")
 
 
 @contextmanager
@@ -300,7 +315,9 @@ def export_bundle(root, archive, *, include_local_feed=False, run_ids=()):
         if private:
             with _freeze_feed(root):
                 (stage / FEED).parent.mkdir()
-                files[FEED] = _copy(_path(root, FEED), stage / FEED, MAX_JSON)
+                source = _path(root, FEED)
+                _feed(source)
+                files[FEED] = _copy(source, stage / FEED, MAX_JSON)
                 _feed(stage / FEED)
         if size + files.get(FEED, {}).get("size", 0) > MAX_TOTAL:
             raise ValueError("Wallet snapshots exceed the backup limit")

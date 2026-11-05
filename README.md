@@ -55,7 +55,7 @@ python raw_walmart.py --debug
 |------------|---------|---------|------|
 | `seo`      | SEO: rankings, local pack, Maps, rank grids, NAP, Reddit mentions | Google web search, Google Maps, Reddit, directory sites | below |
 | `research` | Product research: search results and price-change alerts | Amazon, eBay | [docs/research.md](docs/research.md) |
-| `tao`      | Bittensor subnet stats and prices with change warnings | taostats.io | [docs/tao.md](docs/tao.md) |
+| `tao`      | Bittensor subnet prices, wallet timing, transferred cost basis and local movement monitoring | Taostats and optional local Finney RPC | [Collector](docs/tao.md) · [Data sources](docs/tao-sources.md) · [Windows installer](packaging/windows/README.md) |
 
 Each tool has its own command, config file, SQLite database and GitHub
 Actions schedule (`seo.yml`, `research.yml`, `tao.yml`), so they can be
