@@ -3,6 +3,13 @@ name: Bittensor wallet collection
 on:
   workflow_dispatch:
     inputs:
+      runner:
+        description: "Standard GitHub-hosted runner for the browser"
+        type: choice
+        options:
+          - ubuntu-latest
+          - windows-latest
+        default: ubuntu-latest
       netuids:
         description: "Subnet IDs, comma-separated (overrides subnets)"
         type: string
@@ -52,19 +59,27 @@ concurrency:
 jobs:
   collect:
     if: github.ref == 'refs/heads/master'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner == 'windows-latest' && 'windows-latest' || 'ubuntu-latest' }}
     timeout-minutes: 90
     env:
       STATE_BRANCH: tao-wallet-data
       PYTHONUNBUFFERED: "1"
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v6
 
       - name: Restore wallet history
         shell: bash
         run: |
-          state="$RUNNER_TEMP/tao-wallet-state"
-          report="$RUNNER_TEMP/tao-wallet-report/tao_collect.json"
+          temp_dir="$RUNNER_TEMP"
+          env_file="$GITHUB_ENV"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            temp_dir=$(cygpath -am "$temp_dir")
+            env_file=$(cygpath -am "$env_file")
+          fi
+          state="$temp_dir/tao-wallet-state"
+          report="$temp_dir/tao-wallet-report/tao_collect.json"
           ref="refs/heads/$STATE_BRANCH"
           if git ls-remote --exit-code origin "$ref" > /dev/null; then
             git fetch --no-tags --depth=1 origin "$ref"
@@ -76,8 +91,8 @@ jobs:
             git worktree add --detach --no-checkout "$state" HEAD
             git -C "$state" switch --orphan wallet-state-init
           fi
-          echo "TAO_DB=$state/wallets.sqlite" >> "$GITHUB_ENV"
-          echo "REPORT=$report" >> "$GITHUB_ENV"
+          echo "TAO_DB=$state/wallets.sqlite" >> "$env_file"
+          echo "REPORT=$report" >> "$env_file"
 
       - uses: actions/setup-python@v6
         with:
@@ -117,8 +132,13 @@ jobs:
             for ref in "${refs[@]}"; do args+=(--extrinsic "$ref"); done
           fi
           if [[ -n "$TAO_PROXY" ]]; then args+=(--proxy "$TAO_PROXY"); fi
-          command -v Xvfb xauth xvfb-run google-chrome >/dev/null
-          xvfb-run -a -s "-screen 0 1366x768x24" python -m seo.tao_cli --db "$TAO_DB" "${args[@]}"
+          collect=(python -m seo.tao_cli --db "$TAO_DB" "${args[@]}")
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            "${collect[@]}"
+          else
+            command -v Xvfb xauth xvfb-run google-chrome >/dev/null
+            xvfb-run -a -s "-screen 0 1366x768x24" "${collect[@]}"
+          fi
 
       - name: Summarize coverage and trading results
         env:
@@ -150,7 +170,7 @@ jobs:
                   print("\n**Partial collection.** No account returned usable "
                         + " or ".join(unavailable) + " history in this run.", file=out)
               for evidence in report.get("extrinsics", []):
-                  print(f"\n[Taostats detail]({evidence['url']}) · "
+                  print(f"\n[Taostats detail]({evidence['url']}) Â· "
                         f"{evidence.get('status', 'unavailable')}", file=out)
 
               print(f"Scanned {len(report['metagraph_neurons'])} metagraphs "

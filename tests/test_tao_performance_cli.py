@@ -62,3 +62,15 @@ def test_wallet_detail_shows_prices_gains_transfers_and_rank_history(
         assert a in out.getvalue()
     finally:
         store.close()
+
+
+def test_reports_unknown_when_no_sale_can_be_priced(tmp_path, capsys):
+    address = "5" + "C" * 47
+    record(tmp_path, [event(1, "sell", address, None, 2, 3)],
+           [price(8, 1.5, 4)], day(4), {address: COMPLETE})
+    store = storage.Storage(str(tmp_path / "wallets.sqlite"))
+    try:
+        assert run(store, address) == 0
+        assert "Realized P/L unknown" in capsys.readouterr().out
+    finally:
+        store.close()

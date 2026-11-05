@@ -23,10 +23,14 @@ TABLE_QUERY = """
     + 'iframe[src*="challenges.cloudflare.com"],'
     + '[name="cf-turnstile-response"]');
   const reply = document.querySelector('[name="cf-turnstile-response"]');
+  const host = reply?.parentElement || widget;
+  const rect = host?.getBoundingClientRect();
   const diagnostic = {
     grid_present: !!root,
     rendered_cells: root?.querySelectorAll('[role=gridcell]').length || 0,
     widget_present: !!widget, widget_completed: !!reply?.value,
+    widget_host_size: rect ? [Math.round(rect.width),
+                              Math.round(rect.height)] : null,
     page_ready: document.readyState, query_found: false,
     active_table_queries: 0,
   };
@@ -187,23 +191,42 @@ def fetch_recent_trades(session, pages=1):
     return [r for r in rows if r["kind"] in ("buy", "sell")], coverage
 
 
+def _wait_table(session, js):
+    state = {}
+    for _ in range(PAGE_POLLS):
+        result = session.sb.evaluate(js)
+        state = result if isinstance(result, dict) else {}
+        if state.get("status") in ("success", "error"):
+            break
+        time.sleep(POLL_INTERVAL)
+    return state
+
+
 def _read_pages(session, name, address, tab, pages, window=None):
     events = {}
     incomplete = False
     for page in range(1, pages + 1):
         js = TABLE_QUERY.replace("NAME", json.dumps(name)).replace(
             "OWNER", json.dumps(address)).replace("PAGE", str(page))
-        result = None
-        for _ in range(PAGE_POLLS):
-            state = session.sb.evaluate(js)
-            if window is not None and isinstance(state, dict):
-                window["diagnostic"] = state.get("diagnostic", {})
-            if isinstance(state, dict) and state.get("status") == "success":
-                result = state.get("data")
-                break
-            if isinstance(state, dict) and state.get("status") == "error":
-                break
-            time.sleep(POLL_INTERVAL)
+        state = _wait_table(session, js)
+        diag = state.get("diagnostic", {})
+        if (page == 1 and state.get("status") == "pending"
+                and diag.get("widget_present")
+                and not diag.get("widget_completed")):
+            # Use the browser session's existing normal verification control
+            # once, only after the page has had time to finish on its own.
+            try:
+                session.sb.solve_captcha()
+                attempt = "attempted"
+            except Exception:
+                attempt = "helper_error"
+            state = _wait_table(session, js)
+            diag = state.get("diagnostic", {})
+            diag["verification_control"] = attempt
+        if window is not None:
+            window["diagnostic"] = diag
+        result = (state.get("data")
+                  if state.get("status") == "success" else None)
         if not isinstance(result, dict) or not isinstance(
                 result.get("data"), list):
             if window is not None:

@@ -73,8 +73,10 @@ def _print_position(p):
     print(f"SN{p['netuid']}  {_amount(p['alpha'])} alpha, "
           f"entry {entry}, mark {mark}"
           f" TAO/alpha ({freshness}, {quote})")
+    realized = (p["realized_tao"] if p["priced_sales"]
+                or not p["unpriced_sales"] else None)
     print(f"  marked value {_amount(p['marked_value_tao'])} TAO, "
-          f"realized {_amount(p['realized_tao'], True)} TAO "
+          f"realized {_amount(realized, True)} TAO "
           f"({p['priced_sales']} priced, {p['unpriced_sales']} unpriced), "
           f"unrealized {_amount(p['gross_unrealized_tao'], True)} TAO")
     print(f"  known {_amount(p['known_alpha'])} alpha "
@@ -125,9 +127,15 @@ def _print_detail(wallet, stamp, past):
     if reasons:
         print("Ranking limits  " + ", ".join(
             r.replace("_", " ") for r in reasons))
-    print(f"Gross realized {_amount(wallet['realized_tao'], True)} TAO from "
-          f"{wallet['priced_sales']} priced sales "
-          f"({wallet['wins']} wins, {wallet['unpriced_sales']} unpriced).")
+    if wallet["priced_sales"]:
+        print(f"Gross realized on {wallet['priced_sales']} priced sales "
+              f"{_amount(wallet['realized_tao'], True)} TAO "
+              f"({wallet['wins']} wins, {wallet['unpriced_sales']} unpriced).")
+    elif wallet["unpriced_sales"]:
+        print(f"Realized P/L unknown. All {wallet['unpriced_sales']} sales "
+              "include stake with unverified cost.")
+    else:
+        print("No sales observed.")
     if "gross_unrealized_tao" in wallet:
         unrealized = _amount(wallet["gross_unrealized_tao"], True)
         total = _amount(wallet.get("gross_total_pnl_tao"), True)

@@ -133,3 +133,24 @@ def test_delayed_tab_waits_for_success_after_widget_initializes(monkeypatch):
     near = SlowTable([page([trade(140)], 1, 1)])
     events, status = history.fetch_history(near, WALLET, "transactions", 1)
     assert status == "complete" and len(events) == 1
+
+
+def test_waits_once_for_active_verification_control(monkeypatch):
+    monkeypatch.setattr(history.time, "sleep", lambda _: None)
+
+    class VerifyingTable(Table):
+        attempts = 0
+
+        def evaluate(self, js):
+            if self.attempts:
+                return page([trade(140)], 1, 1)
+            return {"status": "pending", "diagnostic": {
+                "widget_present": True, "widget_completed": False}}
+
+        def solve_captcha(self):
+            self.attempts += 1
+
+    session = VerifyingTable([])
+    rows, status = history.fetch_history(session, WALLET, "transactions", 1)
+    assert status == "complete" and len(rows) == 1
+    assert session.attempts == 1

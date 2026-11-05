@@ -188,8 +188,11 @@ The run summary shows tab coverage, rows read, up to ten traders by gross
 realized TAO, and up to five recent transfers with the evidence for each
 move. It shows priced and unpriced sales separately. Download
 **wallet-collection** for the JSON report and
-SQLite database. This workflow runs manually on standard `ubuntu-latest`,
-with headed Chrome on a 1366×768 Xvfb virtual display. It has a 90-minute
+SQLite database. Select the **runner** when dispatching. The default
+`ubuntu-latest` runs headed Chrome on a 1366×768 Xvfb virtual display.
+Choose `windows-latest` to run Chrome directly on a standard Windows
+runner, or pass `-f runner=windows-latest` to the command above. Both
+runners share the saved wallet history. The workflow has a 90-minute
 time limit and keeps downloadable artifacts for three days. It saves
 wallet history to `wallets.sqlite` on the dedicated
 `tao-wallet-data` branch so it can be restored after artifact expiry.

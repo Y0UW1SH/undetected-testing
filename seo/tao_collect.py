@@ -165,8 +165,10 @@ def _inspect(args, session, store, address, earner, stamp, coverage):
             session, address, tab, args.history_pages, window=window)
         if "since" in window:
             coverage[tab + "_since"] = window["since"]
-        if status != "complete" and window.get("diagnostic"):
-            coverage[tab + "_diagnostic"] = window["diagnostic"]
+        diagnostic = window.get("diagnostic", {})
+        if diagnostic and (status != "complete"
+                           or diagnostic.get("verification_control")):
+            coverage[tab + "_diagnostic"] = diagnostic
         coverage[tab] = status
         coverage[tab + "_rows"] = len(events)
         rows.extend(events)
