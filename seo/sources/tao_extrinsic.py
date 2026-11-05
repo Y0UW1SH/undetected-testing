@@ -7,6 +7,7 @@ not identify its containing extrinsic, and call arguments are not fill data.
 import json
 import re
 from decimal import Decimal
+from collections import Counter
 
 from bs4 import BeautifulSoup
 
@@ -15,6 +16,48 @@ from seo.sources.taostats_wallets import BASE, flight_text
 TARGET = re.compile(r"([0-9]{1,10})-([0-9]{1,5})(?::(.*))?")
 COMPONENT_DATA = re.compile(r'\["\$","\$L[0-9a-f]+",null,\{"data":')
 MAX_EVENT_INDICES = 8
+
+
+def confirms_reallocation(detail, paired_sells):
+    """Verify all paired quantities against a successful, same-subnet move.
+
+    A remark can accompany a batch; a mixed batch, different asset, or
+    unaccounted-for inner call is not proof that all pairs preserved cost.
+    """
+    if detail.get("status") != "observed" or detail.get("success") is not True:
+        return False
+    args = detail.get("call_args")
+    if not isinstance(args, dict):
+        return False
+    if detail.get("call") == "SubtensorModule.move_stake":
+        moves = [args]
+    elif detail.get("call") == "Utility.batch_all":
+        moves = []
+        for child in args.get("calls") or []:
+            if not isinstance(child, dict) or len(child) != 1:
+                return False
+            system = child.get("System")
+            if isinstance(system, dict) and set(system) in (
+                    {"remark"}, {"remark_with_event"}):
+                continue
+            calls = child.get("SubtensorModule")
+            if not isinstance(calls, dict) or set(calls) != {"move_stake"}:
+                return False
+            moves.append(calls["move_stake"])
+    else:
+        return False
+    try:
+        chain = Counter()
+        for m in moves:
+            net = int(m["origin_netuid"])
+            if net != int(m["destination_netuid"]):
+                return False
+            chain[detail["signer"], net, int(m["alpha_amount"])] += 1
+        paired = Counter((e["src"], e["netuid"], round(e["alpha"] * 10**9))
+                         for e in paired_sells)
+        return bool(paired) and paired == chain
+    except (TypeError, ValueError, KeyError, OverflowError):
+        return False
 
 
 def parse_target(text):

@@ -94,3 +94,21 @@ def test_targets_are_bounded_numeric_ids():
                 "9-2:1,2,3,4,5,6,7,8,9"):
         with pytest.raises(ValueError):
             parse_target(bad)
+
+
+def test_batch_move_requires_matching_signer_subnet_quantity_and_inert_calls():
+    from seo.sources.tao_extrinsic import confirms_reallocation
+    move = {"origin_netuid": 24, "destination_netuid": 24,
+            "alpha_amount": 14011228945196}
+    calls = [{"SubtensorModule": {"move_stake": move}},
+             {"System": {"remark_with_event": {"remark": [1]}}}]
+    proof = dict(call="Utility.batch_all", status="observed", success=True,
+                 call_args={"calls": calls}, signer="holder")
+    sell = dict(src="holder", netuid=24, alpha=14011.228945196)
+    assert confirms_reallocation(proof, [sell])
+    assert not confirms_reallocation(proof, [dict(sell, src="other")])
+    assert not confirms_reallocation(proof, [dict(sell, netuid=23)])
+    assert not confirms_reallocation(proof, [dict(sell, alpha=14012)])
+    assert not confirms_reallocation(dict(proof, success=False), [sell])
+    calls.append({"SubtensorModule": {"remove_stake": move}})
+    assert not confirms_reallocation(proof, [sell])

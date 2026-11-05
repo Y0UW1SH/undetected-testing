@@ -5,11 +5,12 @@ from seo.tao_ledger import portfolio
 from tests.test_tao_ledger import day, event
 
 
-def record(tmp_path, events, prices, stamp, coverage, **options):
+def record(tmp_path, events, prices, stamp, coverage, *, snapshot_at=None,
+           **options):
     from seo import tao_performance as perf
 
     store = storage.Storage(str(tmp_path / "wallets.sqlite"))
-    store.save([WalletSnapshot(address=a, snapshot_at=stamp,
+    store.save([WalletSnapshot(address=a, snapshot_at=snapshot_at or stamp,
                                positions_complete=True, balance_total=30)
                 for a, c in coverage.items() if c["account"] == "complete"],
                stamp=stamp)
@@ -131,3 +132,105 @@ def test_timing_allows_proven_recent_window_with_capped_history(tmp_path):
     assert changed["rankings"]["buy"] == []
     assert changed["wallets"][0]["screens"] == []
     assert "activity_24h_incomplete" in changed["wallets"][0]["evidence_gaps"]
+
+
+def test_unsold_holders_rank_by_return_and_proven_cost(tmp_path):
+    from seo import tao_performance as perf
+
+    events = [event(1, "buy", None, "A", 2, 1),
+              event(2, "buy", None, "B", 50, 40),
+              event(1, "buy", None, "C", 20, 10, id="c-buy"),
+              event(2, "stake_transfer", None, "C", 2, id="c-in"),
+              event(3, "stake_transfer", None, "D", 2, id="d-in")]
+    r = record(tmp_path, events, [price(8, 1, 4)], day(4),
+               {a: COMPLETE for a in "ABCD"})
+    assert r["rankings"]["profit"] == []
+    assert r["rankings"]["open"] == ["A", "B"]
+    assert r["rankings"]["open_partial"] == ["C"]
+    w = {w["address"]: w for w in r["wallets"]}
+    assert w["A"]["open"]["return_pct"] == 100
+    assert w["A"]["open"]["days_since_addition"] == 3
+    assert w["A"]["priced_sales"] == 0
+    assert w["C"]["open"]["return_pct"] is None
+    assert w["C"]["open"]["known_pnl_tao"] == 10
+    assert w["C"]["open"]["known_return_pct"] == 100
+    assert w["C"]["open"]["known_value_fraction"] == 20 / 22
+    assert w["D"]["open"]["known_pnl_tao"] is None
+    assert perf.follow_candidates(r, 4) == ["A", "B"]
+
+
+def test_open_ranks_require_current_prices_inventory_and_no_trading_loss(
+        tmp_path):
+    events = [event(1, "buy", None, "A", 10, 5),
+              event(2, "sell", "A", None, 9, .5)]
+    r = record(tmp_path, events, [price(8, 2, 3)], day(3), {"A": COMPLETE})
+    w = r["wallets"][0]
+    assert abs(w["open"]["known_pnl_tao"] - 1.5) < 1e-12
+    assert abs(w["gross_total_pnl_tao"] + 2.5) < 1e-12
+    assert not r["rankings"]["open"]
+    stale = record(tmp_path, events, [price(8, 2, 3)], day(4),
+                   {"A": COMPLETE})
+    assert stale["wallets"][0]["open"]["known_pnl_tao"] is None
+    assert not stale["rankings"]["open"]
+    assert not stale["rankings"]["open_partial"]
+
+
+def test_partial_realized_research_is_separate_from_confirmed_winners(
+        tmp_path):
+    from seo.tao_performance import follow_candidates
+
+    events = [event(1, "buy", None, "A", 2, 1),
+              event(2, "stake_transfer", None, "A", 2),
+              event(3, "sell", "A", None, 2, 2),
+              event(4, "sell", "A", None, 2, 2)]
+    r = record(tmp_path, events, [price(8, 1., 5)], day(5), {"A": COMPLETE})
+    assert r["rankings"]["profit_partial"] == ["A"]
+    assert not r["rankings"]["profit"]
+    assert follow_candidates(r, 4) == []
+    w = r["wallets"][0]
+    assert w["known_realized_tao"] == 1.
+    assert w["known_sale_value_fraction"] == .5
+
+
+def test_timing_requires_distinct_winning_days_and_mature_quote_coverage(
+        tmp_path):
+    events = [event(1, "buy", None, "A", 1, 1, id="first"),
+              event(1, "buy", None, "A", 1, 1, id="second"),
+              event(2, "buy", None, "A", 1, 1, id="flat")]
+    quotes = [price(8, 1.2, 2), price(8, 1., 3)]
+    r = record(tmp_path, events, quotes, day(4), {"A": COMPLETE})
+    t = r["wallets"][0]["timing"]["buy"]
+    assert t["mature_trades"] == t["evaluated"] == 3
+    assert (t["trade_days"], t["favorable_days"]) == (2, 1)
+    assert not r["rankings"]["buy"]
+    extra = [event(n, "buy", None, "A", 1, 1, id="extra-%d" % n)
+             for n in (5, 6, 7, 8, 10, 11)]
+    r = record(tmp_path, events + extra, [price(8, 1.2, 3), quotes[0]],
+               day(10), {"A": COMPLETE})
+    t = r["wallets"][0]["timing"]["buy"]
+    assert t["mature_trades"] == 7 and t["evaluated"] == 3
+    assert t["favorable_days"] == 2 and t["quote_coverage"] == 3 / 7
+    assert not r["rankings"]["buy"]
+    assert t["examples"][0]["trade_at"] == day(2)
+    assert t["examples"][0]["quote_at"] == day(3)
+    assert t["examples"][0]["quote_tao"] == 1.2
+
+
+def test_stale_snapshot_and_native_moves_do_not_pass_screens(tmp_path):
+    events = [event(1, "buy", None, "A", 2, 1),
+              event(2, "buy", None, "A", 2, 1),
+              event(3, "buy", None, "A", 2, 1),
+              dict(event(5, "stake_transfer", "A", "A", 2),
+                   evidence="native_move"),
+              dict(event(5, "stake_transfer", "A", "A", 2, id="move2"),
+                   evidence="matching_trade_legs")]
+    prices = [price(8, 1., n) for n in (2, 3, 4, 6)]
+    r = record(tmp_path, events, prices, day(6), {"A": COMPLETE},
+               max_activity_24h=1, snapshot_at=day(2))
+    w = r["wallets"][0]
+    assert w["activity_24h"]["reallocations"] == 2
+    assert sum(w["activity_24h"].values()) == 2
+    assert "snapshot_stale" in w["evidence_gaps"]
+    assert "activity_above_limit" in w["screens"]
+    assert w["open"]["known_pnl_tao"] is None
+    assert not r["rankings"]["buy"] and not r["rankings"]["open"]

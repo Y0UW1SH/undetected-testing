@@ -7,7 +7,11 @@ from seo.sources.taostats_wallets import account_url
 from seo.tao_wallets import short
 
 
-BOARDS = {"profit": "Realized profit", "buy": "Buys before rises",
+BOARDS = {"profit": "Realized profit",
+          "open": "Open gains on fully costed positions",
+          "profit_partial": "Realized gains on the confirmed portion only",
+          "open_partial": "Open gains with incomplete wallet P/L",
+          "buy": "Buys before rises",
           "sell": "Sales before falls"}
 
 
@@ -37,15 +41,46 @@ def _amount(value, signed=False):
 def _metric(wallet, board):
     if board == "profit":
         return (f"{_amount(wallet['realized_tao'], True)} TAO, "
-                f"{wallet['wins']}/{wallet['priced_sales']} priced sales won")
+                f"{wallet['wins']}/{wallet['priced_sales']} priced sales won; "
+                f"open P/L "
+                f"{_amount(wallet.get('gross_unrealized_tao'), True)} TAO")
+    if board in ("open", "open_partial"):
+        m = wallet["open"]
+        if board == "open":
+            days = m.get("days_since_addition")
+            age = (f", last observed addition {days:g} days ago"
+                   if days is not None else "")
+            return (f"{_amount(wallet['gross_unrealized_tao'], True)} TAO "
+                    f"unrealized ({_amount(m['return_pct'], True)}%); "
+                    f"realized {_amount(wallet['realized_tao'], True)} TAO, "
+                    f"{wallet['priced_sales']} priced sales{age}")
+        share = 100 * m["known_value_fraction"]
+        unresolved = ("total open P/L unknown" if m["return_pct"] is None
+                      else "open P/L fully priced, total wallet P/L unknown")
+        return (f"{_amount(m['known_pnl_tao'], True)} TAO unrealized on "
+                f"known units ({_amount(m['known_return_pct'], True)}%); "
+                f"basis confirmed for {share:.1f}% of marked value, "
+                + unresolved)
+    if board == "profit_partial":
+        covered = 100 * wallet["known_sale_value_fraction"]
+        return (f"{_amount(wallet['known_realized_tao'], True)} TAO realized "
+                f"on confirmed units; cost traced for {covered:.1f}% of sale "
+                "proceeds, total realized P/L unknown")
     side = wallet["timing"][board]
+    if "mature_trades" in side:
+        return (f"{side['favorable']}/{side['evaluated']} favorable across "
+                f"{side['favorable_days']} favorable UTC days; quotes "
+                f"evaluated {side['evaluated']}/{side['mature_trades']} "
+                "mature trades")
     return (f"{side['favorable']}/{side['evaluated']} favorable across "
             f"{side['trade_days']} trade days")
 
 
 def _headings(settings):
     move = _amount(settings.get("move_pct"))
-    return dict(profit=BOARDS["profit"],
+    return dict(profit=BOARDS["profit"], open=BOARDS["open"],
+                profit_partial=BOARDS["profit_partial"],
+                open_partial=BOARDS["open_partial"],
                 buy=f"{BOARDS['buy']} of at least {move}% at 24-30h",
                 sell=f"{BOARDS['sell']} of at least {move}% at 24-30h")
 
@@ -55,11 +90,28 @@ def _print_boards(run):
     print(f"Wallet performance at {run['checked_at']}")
     for board, heading in _headings(run["settings"]).items():
         print(f"\n{heading}")
-        addresses = run["rankings"][board]
+        if not _board_measured(run, board):
+            print("This rank was not measured for this run.")
+            continue
+        addresses = run["rankings"].get(board, [])
         if not addresses:
             print("No qualifying wallets.")
         for rank, addr in enumerate(addresses, 1):
             print(f"{rank:>3}. {addr}  {_metric(by_address[addr], board)}")
+
+
+def _board_measured(run, board):
+    return not run["wallets"] or any(
+        board in w["ranks"] for w in run["wallets"])
+
+
+def _partial_sales(row):
+    if row.get("partial_sales"):
+        gain = _amount(row["known_realized_tao"], True)
+        unresolved = _amount(row["unresolved_sale_proceeds_tao"])
+        print(f"  Confirmed sold units: realized {gain} TAO across fully "
+              f"and partially priced sales. {unresolved} TAO of sale "
+              "proceeds have unresolved cost.")
 
 
 def _print_position(p):
@@ -79,6 +131,7 @@ def _print_position(p):
           f"realized {_amount(realized, True)} TAO "
           f"({p['priced_sales']} priced, {p['unpriced_sales']} unpriced), "
           f"unrealized {_amount(p['gross_unrealized_tao'], True)} TAO")
+    _partial_sales(p)
     print(f"  known {_amount(p['known_alpha'])} alpha "
           f"(cost {_amount(p['known_cost_tao'])} TAO), "
           f"estimated {_amount(p['probable_alpha'])} alpha "
@@ -136,11 +189,26 @@ def _print_detail(wallet, stamp, past):
               "include stake with unverified cost.")
     else:
         print("No sales observed.")
+    _partial_sales(wallet)
     if "gross_unrealized_tao" in wallet:
         unrealized = _amount(wallet["gross_unrealized_tao"], True)
         total = _amount(wallet.get("gross_total_pnl_tao"), True)
         print(f"Gross unrealized {unrealized} TAO on open positions. "
               f"Gross total P/L {total} TAO.")
+    opened = wallet.get("open", {})
+    if opened.get("known_pnl_tao") is not None:
+        known = _amount(opened["known_pnl_tao"], True)
+        rate = _amount(opened["known_return_pct"], True)
+        share = opened["known_value_fraction"]
+        print(f"Confirmed open portion {known} TAO ({rate}%); known basis "
+              f"covers {share:.1%} of marked subnet value.")
+        if opened.get("last_observed_addition_at"):
+            print("Latest observed buy or stake received on these subnets "
+                  + opened["last_observed_addition_at"])
+    if any(s.get("mature_trades") for s in wallet["timing"].values()):
+        print("\nTiming on observed mature trades")
+        for side in ("buy", "sell"):
+            print(f"  {side}: {_metric(wallet, side)}")
     print("\nSubnet positions and gross P/L")
     if not wallet["positions"]:
         print("No subnet positions or sales recorded.")
@@ -149,12 +217,13 @@ def _print_detail(wallet, stamp, past):
     _print_links(wallet)
     if past:
         print("\nRank history (newest first)")
-        print("Run                        Profit   Buy  Sell   "
+        print("Run                      Profit Open PartR PartO Buy Sell   "
               "Realized TAO  Unrealized TAO")
         for row in past:
             ranks = "  ".join(str(row["ranks"].get(k) or "-").rjust(4)
                               for k in BOARDS)
-            realized = _amount(row["realized_tao"], True)
+            realized = _amount(row["realized_tao"] if row["priced_sales"]
+                               or not row["unpriced_sales"] else None, True)
             unrealized = _amount(row.get("gross_unrealized_tao"), True)
             print(f"{row['checked_at']}  {ranks}  "
                   f"{realized:>12}  {unrealized:>14}")
@@ -185,7 +254,7 @@ def _account_link(address):
 
 
 def append_summary(report, out):
-    """Append the top three entries per board to an Actions summary stream."""
+    """Show screened rankings and keep partial gains separately labeled."""
     performance = report.get("performance", report)
     print("\n### Wallet performance\n", file=out)
     if not performance or "rankings" not in performance:
@@ -196,10 +265,14 @@ def append_summary(report, out):
     rankings = performance["rankings"]
     for board in BOARDS:
         print(f"**{headings[board]}**\n", file=out)
-        if not rankings[board]:
+        if not _board_measured(performance, board):
+            print("This rank was not measured in this run.\n", file=out)
+            continue
+        if not rankings.get(board):
             print("No qualifying wallets.\n", file=out)
             continue
-        for rank, addr in enumerate(rankings[board][:3], 1):
+        limit = 10 if board == "profit" else 3
+        for rank, addr in enumerate(rankings[board][:limit], 1):
             print(f"{rank}. {_account_link(addr)}  "
                   f"{_metric(wallets[addr], board)}", file=out)
         print(file=out)

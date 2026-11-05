@@ -1,0 +1,101 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Wallet ledger · Taostats</title>
+<style>
+:root{color-scheme:light;--ink:#183129;--muted:#52645b;--line:#ced7cf;--paper:#f8faf6;--green:#00633e}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
+main{max-width:1370px;margin:auto;padding:30px clamp(16px,4vw,62px) 60px}
+header{border-bottom:2px solid var(--ink);padding-bottom:18px}h1,h2,h3{line-height:1.15;margin:0}
+h1{font:clamp(34px,5vw,66px)/1.15 Georgia,serif;letter-spacing:-.035em}h2{font:30px Georgia,serif;margin-top:30px}h3{font-size:17px;margin-top:28px}
+p{color:var(--muted);max-width:78ch;margin:7px 0 15px}a{color:var(--green);text-underline-offset:3px;overflow-wrap:anywhere}
+button,select,input{font:inherit;color:inherit;background:white;border:1px solid #9aaba0;border-radius:4px;padding:8px 10px}
+button{cursor:pointer}button:hover{background:#e9f0e9}button[aria-pressed=true]{background:var(--ink);color:white}
+*:focus-visible{outline:3px solid #067850;outline-offset:2px}::selection{background:#c5e7d2}
+nav,.controls{display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin:17px 0}nav{gap:5px}
+label{display:grid;gap:3px;color:var(--muted);font-size:13px}label input,label select{color:var(--ink);font-size:15px}
+.scroll{max-width:100%;overflow:auto}.scroll table{width:100%;border-collapse:collapse}
+th,td{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;padding:8px 12px;border-bottom:1px solid var(--line)}
+th{font-size:12px;color:var(--muted);background:#edf2eb}th:first-child,td:first-child{text-align:left;padding-left:5px}
+td button{padding:3px 7px;font-family:ui-monospace,monospace;font-size:14px}
+.address{font-family:ui-monospace,monospace;font-size:clamp(13px,2vw,17px);overflow-wrap:anywhere;margin-top:9px}
+.pos{color:#00633e}.neg{color:#97372a}.empty{padding:18px 0;border-bottom:1px solid var(--line)}
+.note{color:var(--muted);font-size:13px}.up{margin-top:25px}summary{cursor:pointer;padding:10px 0}
+[hidden]{display:none!important}@media(max-width:640px){main{padding-top:16px}nav button{font-size:13px}th,td{padding:6px 8px}}
+</style></head><body><main><header><h1>Wallet ledger</h1><p id="stamp"></p></header>
+<nav aria-label="View"><button id="bwallet" aria-pressed="true">Wallets</button><button id="bfeed" aria-pressed="false">Watchlist activity</button></nav>
+<section id="list"><h2>Wallet results</h2><div class="controls">
+<label>Show<select id="board"><option value="all">Inspected wallets</option><option value="buy">Buys before rises</option><option value="sell">Sales before drops</option><option value="open">Open gains with verified cost</option><option value="partial">Open gains with partial cost</option><option value="profit">Realized winners</option><option value="profit_partial">Sales with partial cost</option></select></label>
+<label>Find wallet<input id="search" type="search" placeholder="Wallet address or prefix"></label></div>
+<p id="rule"></p><div id="results"></div><div id="detail" aria-live="polite"></div></section>
+<section id="feed" hidden></section>
+<script type="application/json" id="report"><!--PAYLOAD--></script>
+<script>
+'use strict';
+const R=JSON.parse(document.getElementById('report').textContent), P=R.performance, $=id=>document.getElementById(id);
+const el=(tag,t)=>{const n=document.createElement(tag);if(t!=null)n.textContent=t;return n};
+const num=(v,d=2)=>Number.isFinite(v)?v.toLocaleString('en-US',{maximumFractionDigits:d}):'Unknown';
+function pn(v){const n=el('span',(v>0?'+':'')+num(v));if(v>0)n.className='pos';if(v<0)n.className='neg';return n}
+const short=a=>a?a.slice(0,7)+'…'+a.slice(-5):'Unknown';
+const time=t=>t?String(t).replace('T',' ').slice(0,19)+' UTC':'Unknown';
+const wallets=new Map(P.wallets.map(w=>[w.address,w])), watched=new Set(R.following||[]);
+const inspected=w=>Boolean(R.coverage?.[w.address]), clean=w=>!(w.screens||[]).length;
+const signedKnown=w=>Number.isFinite(w.known_realized_tao)?w.known_realized_tao:w.priced_sales?w.realized_tao:null;
+function openKnown(w){if(w.open)return w.open.known_pnl_tao??w.gross_unrealized_tao;const vals=(w.positions||[]).map(p=>p.known_unrealized_tao).filter(Number.isFinite);return vals.length?vals.reduce((a,b)=>a+b,0):w.gross_unrealized_tao}
+function add(n,tag,t){const c=el(tag,t);n.append(c);return c}
+function anchor(base,id){if(!id)return 'Unknown';let a=el('a',id);a.href='https://taostats.io/'+base+'/'+encodeURIComponent(id);a.target='_blank';a.rel='noopener noreferrer';return a}
+function grid(target,headers,rows,none){if(!rows.length){add(target,'p',none).className='empty';return}
+let box=add(target,'div');box.className='scroll';let t=add(box,'table'),r=add(add(t,'thead'),'tr');headers.forEach(h=>add(r,'th',h));
+let body=add(t,'tbody');for(let vals of rows){r=add(body,'tr');for(let v of vals){let td=add(r,'td');if(v instanceof Node)td.append(v);else td.textContent=v??'Unknown'}}}
+function acct(a){if(!a)return 'Unknown';if(!wallets.has(a))return anchor('account',a);let b=el('button',short(a));b.title=a;b.onclick=()=>show(a,true);return b}
+const hits=(w,k)=>{let t=w.timing?.[k];return t?t.favorable+'/'+t.evaluated:'—'};
+const rules={all:'Sorted by unrealized gain on traceable units. Exchange-like accounts are hidden. An unknown-cost portion can change a wallet’s total profit.',
+buy:'A buy counts when the subnet rose at least '+P.settings.move_pct+'% at the first quote 24–30 hours after the trade. Missing quotes do not count as misses.',
+sell:'A sale counts when the subnet fell at least '+P.settings.move_pct+'% at the first quote 24–30 hours after the trade. A transfer is not a sale.',
+open:'Open gains with current quotes and confirmed acquisition costs. No sale is required.',
+partial:'Positive open gains visible on traceable units. These do not establish a whole-wallet profit.',
+profit:'Repeat wins on fully priced sales. A positive subtotal on incomplete sales is not enough to qualify.',
+profit_partial:'Positive realized gains on the known portion of sales. The total result can still be a loss.'};
+function listing(){let key=$('board').value,q=$('search').value.trim().toLowerCase();let ranked=P.rankings[key]||[];
+let list=key==='all'?[...wallets.values()].filter(inspected).sort((a,b)=>(openKnown(b)??-Infinity)-(openKnown(a)??-Infinity)):
+key==='partial'?(P.rankings.partial_open||P.rankings.open_partial||[]).map(a=>wallets.get(a)):ranked.map(a=>wallets.get(a));
+list=list.filter(w=>w&&clean(w)&&w.address.toLowerCase().includes(q));$('results').replaceChildren();$('rule').textContent=rules[key];
+grid($('results'),['Wallet','Realized on known units · TAO','Open on known units · TAO','Whole-wallet P/L · TAO','Buys hit / evaluated','Sales hit / evaluated'],
+list.map(w=>[acct(w.address),pn(signedKnown(w)),pn(openKnown(w)),pn(w.gross_total_pnl_tao),hits(w,'buy'),hits(w,'sell')]),q?'No matching wallet.':'No wallets meet this filter in this run.')}
+function show(a,focus){let w=wallets.get(a);if(!w)return;toggle(false);const s=$('detail');s.replaceChildren();add(s,'h2','Wallet detail');
+const label=add(s,'div');label.className='address';label.append(anchor('account',a));
+let reasons=[...(w.screens||[]),...(w.evidence_gaps||[])].map(t=>t.replaceAll('_',' '));
+add(s,'p',[watched.has(a)?'Watched':'Not on watchlist','Account as of '+time(w.account_as_of),...reasons].join(' · '));
+if(R.discovery_sources?.[a]?.length)add(s,'p','Discovered from: '+R.discovery_sources[a].join(', '));
+add(s,'h3','Sales and open holdings');
+add(s,'p',w.priced_sales+' fully priced sales; '+w.unpriced_sales+' sales with some or all cost unknown. TAO are gross of fees. Unknown cost is never set to zero.');
+if(w.open){const o=w.open;add(s,'p','Open gain on traceable units: '+num(o.known_pnl_tao)+' TAO · Cost traced for '+num(o.known_value_fraction==null?null:100*o.known_value_fraction)+'% of marked holdings by value. Latest observed addition: '+time(o.last_observed_addition_at)+'.');}
+if(w.unpriced_sales)add(s,'p','Sale proceeds with unresolved cost: '+num(w.unresolved_sale_proceeds_tao)+' TAO.');
+grid(s,['Subnet','Held α','Known α','Known entry · TAO/α','Mark · TAO/α','Estimated-cost α','Unknown-cost α','Realized on known · TAO','Open on known · TAO'],
+(w.positions||[]).map(p=>['SN'+p.netuid,num(p.alpha,3),num(p.known_alpha,3),num(p.known_buy_price_tao,9),num(p.current_quote?p.price_tao:null,9),num(p.probable_alpha,3),num(p.unknown_alpha,3),pn(signedKnown(p)),pn(p.known_unrealized_tao)]),'No positions or sales observed.');
+add(s,'h3','Trade timing');grid(s,['Side','Favorable / evaluated','Mature trades','Favorable days','Mean directional move'],['buy','sell'].map(k=>{let t=w.timing[k];return[k,hits(w,k),t.mature_trades,t.favorable_days,t.mean_directional_move_pct==null?'Unknown':num(t.mean_directional_move_pct)+'%']}),'No timed trades.');
+let proof=(R.timing_evidence?.matches||R.historical_prices?.matches||[]).filter(x=>x.address===a);
+let journal=add(s,'details');add(journal,'summary','Price evidence for individual trades');
+grid(journal,['Trade time','Side','Subnet','Execution · TAO/α','Quote time','Later · TAO/α','Favorable move %','Extrinsic'],proof.map(x=>[time(x.trade_time),x.kind,'SN'+x.netuid,num(x.fill_price_tao,9),time(x.quote_time),num(x.price_tao,9),pn(x.favorable_move_pct),anchor('extrinsic',x.extrinsic)]),'No qualifying forward quote for this wallet in the saved evidence.');
+const sales=(R.sale_details||[]).filter(x=>x.address===a).sort((a,b)=>b.time.localeCompare(a.time));
+add(s,'h3','Sale receipts');grid(s,['Time','Subnet','Proceeds · TAO','Traceable proceeds · TAO','Traceable cost · TAO','Traceable P/L · TAO','Extrinsic'],
+sales.map(x=>[time(x.time),'SN'+x.netuid,num(x.proceeds_tao),num(x.known_proceeds_tao),num(x.known_cost_tao),pn(x.known_realized_tao),anchor('extrinsic',x.extrinsic)]),'No itemized sales in this snapshot.');
+add(s,'h3','Transfer evidence');let ties=(R.transfers||[]).filter(t=>t.src===a||t.dst===a).sort((a,b)=>b.time.localeCompare(a.time));grid(s,['Time','Direction','Peer','Asset','Quantity','Evidence','Extrinsic'],ties.map(e=>{let out=e.src===a,stake=e.kind==='stake_transfer';return[time(e.time),out?'Sent':'Received',acct(out?e.dst:e.src),stake?'SN'+e.netuid+' alpha':'TAO',num(stake?e.alpha:e.tao,5),e.evidence,anchor('extrinsic',e.extrinsic)]}),'No transfer evidence.');
+let carried=(R.transfer_details||[]).filter(x=>x.kind==='stake_transfer'&&(x.src===a||x.dst===a));
+if(carried.length){add(s,'h3','Buy prices across stake transfers');add(s,'p','Entry is weighted across traceable units. A debit-only row shows the sender’s cost; it does not establish the recipient’s entry. Original fills are listed below.');
+grid(s,['Transfer','Subnet','Known α','Known entry · TAO/α','Known cost · TAO','Unknown α','Basis','Original fills'],
+carried.slice().reverse().map(x=>{let refs=el('span');for(let o of (x.origins||[])){if(refs.childNodes.length)refs.append('; ');let l=anchor('extrinsic',o.extrinsic);if(l instanceof Node)l.title=o.address+' · '+num(o.alpha,4)+' alpha · '+o.basis_status;refs.append(l,' @ '+num(o.unit_buy_price_tao,9))}if(x.other_origin_alpha>0)refs.append(' + other purchases');return[anchor('extrinsic',x.extrinsic), 'SN'+x.netuid,num(x.known_alpha,5),num(x.known_buy_price_tao,9),num(x.known_cost_tao),num(x.unknown_alpha,4),x.basis_status,refs.childNodes.length?refs:'Unknown']}),'No carried cost observed.')}
+let log=add(s,'details');add(log,'summary','All recorded transactions for this wallet');grid(log,['Time','Movement','Subnet','Alpha','TAO','Extrinsic'],(R.events||[]).filter(e=>e.src===a||e.dst===a).sort((a,b)=>b.time.localeCompare(a.time)).map(e=>[time(e.time),e.kind,e.netuid??'—',num(e.alpha,4),num(e.tao),anchor('extrinsic',e.extrinsic)]),'No recorded transactions.');
+if(focus){s.tabIndex=-1;s.focus();s.scrollIntoView()}}
+function feed(){let s=$('feed');add(s,'h2','Watchlist activity');let m=R.monitor||{},rc=m.recent||[];
+add(s,'p',(m.new_count||0)+' newly indexed wallet movements in this check. The first successful check sets a baseline. A gap means that tab could not cover the interval.');
+grid(s,['Wallet','Transactions','Transfers'],Object.entries(m.status||{}).map(([a,v])=>[acct(a),v.transactions,v.transfers]),'No watched wallets were checked in this snapshot.');
+grid(s,['Time','Wallet','Movement','Subnet','Alpha','TAO','Extrinsic'],rc.map(e=>[time(e.time),acct(e.watched_address),e.kind,e.netuid??'—',num(e.alpha,4),num(e.tao),anchor('extrinsic',e.extrinsic)]),'No new indexed movements since the watchlist baseline.');
+if(R.local_feed){const f=R.local_feed;add(s,'h3','Local finalized activity');const state=add(s,'p');
+const describe=()=>{let stale=Date.now()-Date.parse(f.checked_at)>1000*(f.stale_after_seconds||660);state.textContent='Status: '+(stale?'stale snapshot — refresh this file or check the watcher':(f.status||'unknown'))+' · Checked '+time(f.checked_at)+' · Last scanned block '+num(f.last_scanned_block,0)+' · '+num(f.lag_blocks,0)+' blocks behind. Stake changes are observations; the next Taostats pass reconciles trades and cost.'};describe();setInterval(describe,60000);
+grid(s,['Time','Movement','From','To','Subnet','Alpha','TAO','Extrinsic'],(f.events||[]).map(e=>[time(e.time),e.kind,acct(e.src),acct(e.dst),e.netuid??'—',num(e.alpha,4),num(e.tao),anchor('extrinsic',e.extrinsic)]),'No matching finalized movements in the local coverage window.')}
+else{add(s,'h3','Five-minute local checks');add(s,'p','No local chain feed is attached. Start watch_wallets.cmd on this PC to check finalized movements for your watchlist.');}}
+function toggle(f){$('feed').hidden=!f;$('list').hidden=f;$('bfeed').setAttribute('aria-pressed',f);$('bwallet').setAttribute('aria-pressed',!f)}
+$('stamp').textContent='Taostats snapshot · '+time(R.checked_at)+' · '+Object.keys(R.coverage||{}).length+' wallets inspected · '+(R.events||[]).length+' stored movements';
+$('search').oninput=listing;$('board').onchange=listing;$('bfeed').onclick=()=>toggle(true);$('bwallet').onclick=()=>toggle(false);listing();feed();
+</script></main></body></html>

@@ -118,9 +118,9 @@ performance, open the collector's `tao_collect.json` report.
 * `traders` lists wallets with costed sales, ordered by observed realized
   TAO before separate fees. The win rate uses only priced sales. See `unpriced_sales` for the
   number omitted, and check how many sales and accounts contributed.
-  `--follow-top N` adds up to N wallets with a complete current transaction
-  tab, zero unpriced sales, positive gross realized TAO, at least two priced
-  sales and a win rate above 50%. A receiving address linked by
+  `--follow-top N` interleaves the strict realized and strict open rankings
+  and deduplicates wallets before following them. Partial rankings are for
+  research only. A receiving address linked by
   a stake move from a followed wallet can also join the watchlist after
   inspection and balance/activity screening. Pending recipients stay linked
   in the report without joining the watchlist.
@@ -148,15 +148,18 @@ Earlier runs preserve the evidence and thresholds used at the time.
   sales, before separate fees. To qualify, a wallet needs positive
   realized TAO, wins on more than half its priced sales, complete current
   account and trade coverage, zero unpriced sales, and at least
-  `--min-sales` priced sales (default 2). The same rank governs
-  `--follow-top`. Check open gains and losses separately.
+  `--min-sales` priced sales (default 2). The separate open-gain rank
+  can include wallets with no sales.
 * **Buy timing** and **sell timing** use the first subnet quote observed
   24 to 30 hours after each execution. A buy is favorable when the price
   rises by at least `--timing-move-pct` (default 5%). A sell is favorable
   when it falls by that much. Each side needs a majority of favorable
-  results and at least `--min-timing` evaluated trades (default 3) across
-  two or more UTC dates. Rank uses the favorable fraction, then sample
-  count. Trades without a later quote do not enter either count.
+  results and at least `--min-timing` evaluated trades (default 3), hits
+  on two or more UTC dates, and quotes on at least half the mature trades
+  observed on that side. Missing quotes are excluded from the hit rate
+  but reduce coverage. The JSON includes each sampled trade's execution
+  and forward quote. Taostats pool history and subnet charts supply older
+  prices without waiting for new daily scans.
 * **Holdings** show the confirmed, estimated and unknown quantities for
   each subnet. `known_buy_price_tao` and `known_unrealized_tao` cover the
   traceable portion even when another part of the position has unknown
@@ -178,6 +181,41 @@ Earlier runs preserve the evidence and thresholds used at the time.
 
 ## Run the wallet collector on GitHub
 
+For a local wallet view, run `view_wallets_github.cmd` (or supply an Actions
+run ID as its first argument). This downloads the GitHub wallet artifact,
+caches it under `github_out/<run>/`, and opens `github_out/wallets.html`.
+To open it again offline, open the HTML directly. To render a saved JSON
+without GitHub or Taostats, run `python -m seo.tao_view --input PATH`.
+The view includes all inspected accounts below the screens, even when their
+trading record is incomplete. Select a wallet to inspect the sale receipts,
+positions, acquisition prices, transfers, and quotes behind the timing scores.
+
+The realized column includes gross gain/loss on the confirmed fraction of
+partially costed sales. Unknown-cost proceeds are separately identified, never
+booked as gains. Same-wallet moves between validators are not market trades.
+Only confirmed native moves keep confirmed cost on the moved units; ambiguous
+pairs cannot establish a new purchase price. Open positions can qualify
+without a sale. Open gains on traceable fractions are shown separately from
+fully costed holdings. The source account keeps its trading history even when
+stake moves; the receiving account inherits the traceable acquisition cost.
+
+The daily GitHub watchlist reconciliation uses Taostats only. Specify
+`watch_addresses` on a manual collection to save wallets on the data branch.
+The first readable check of each tab sets a baseline; subsequent checks
+record indexed movements, and an unreadable interval remains marked as a gap.
+An outgoing TAO transfer is not sale proceeds just because it followed a sale.
+
+For a five-minute movement feed, download the wallet report and then run
+`watch_wallets.cmd --setup` once and `watch_wallets.cmd` on your PC.
+The local watcher reads the latest cached watchlist and asks for your Dwellir
+key in a masked console if it isn't already set locally. Leave that console
+running; refresh the HTML to see its latest successful block, lag, and
+movements. It reads finalized blocks and resumes from its local checkpoint.
+It cannot send five-minute updates while the PC is asleep or off. Local
+stake increases/decreases are observations; the Taostats data confirms
+trades, stake transfers, and entry prices. The GitHub workflow never installs
+or calls Dwellir. See [Dwellir's Bittensor limits](https://www.dwellir.com/docs/bittensor).
+
 Open **Actions → Bittensor wallet collection → Run workflow** and choose
 `master`. For the first run, enter `8` for **netuids**, `2` for **top**
 and `1` for **history_pages**, or run:
@@ -188,9 +226,9 @@ gh workflow run tao-collect.yml --ref master -f netuids=8 -f top=2 -f history_pa
 
 If the wallet verification widget stays pending, the artifact can include
 one screenshot of the public page and its query state in the JSON.
-The run summary shows tab coverage, rows read, up to ten traders by gross
-realized TAO, and up to five recent transfers with the evidence for each
-move. It shows priced and unpriced sales separately. Download
+The run summary shows tab coverage, rows read, screened rankings and up
+to five recent transfers with the evidence for each move. It shows fully
+priced and unresolved sales separately. Download
 **wallet-collection** for the JSON report and
 SQLite database. Select the **runner** when dispatching. The default
 `ubuntu-latest` runs headed Chrome on a 1366×768 Xvfb virtual display.

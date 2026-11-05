@@ -202,7 +202,7 @@ def fetch_history(session, address, tab, pages, *, window=None):
     return _read_pages(session, name, address, tab, pages, window)
 
 
-def fetch_recent_trades(session, pages=1):
+def fetch_recent_trades(session, pages=6):
     """Read recent buyers and sellers from the chain-wide delegation grid."""
     session.goto(BASE + "/delegation", check_google=False)
     rows, coverage = _read_pages(session, "delegate", None, "transactions",

@@ -25,4 +25,4 @@ version = {attr = "seo.__version__"}
 include = ["seo*"]
 
 [tool.setuptools.package-data]
-seo = ["config/*.json"]
+seo = ["config/*.json", "wallet_view.html"]

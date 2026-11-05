@@ -1,15 +1,17 @@
 """Accounting for observed trades, transfers and subnet position snapshots."""
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import timedelta, timezone
 import math
+
+from seo.tao_wallets import _parse_ts
 
 
 def _chain_order(event):
     numbers = str(event.get("extrinsic", "")).split("-")
     sequence = tuple(int(n) for n in numbers if n.isdigit())
-    return (event["time"], sequence,
+    return (_parse_ts(event["time"]), sequence,
             int(event.get("event_index") or 0), event["id"])
 
 
@@ -53,7 +55,33 @@ def _inventory_endpoints(event):
     return event["src"], event["dst"]
 
 
-def net_transfers(events):
+def _reallocation_pairs(events):
+    # Moving stake to another validator can appear in the Taostats table as
+    # an ordinary sell immediately followed by an ordinary buy. Require the
+    # exact same cash and token amounts and consecutive chain-event indices.
+    fills = sorted((e for e in events if e["kind"] in ("sell", "buy")),
+                   key=_chain_order)
+    for sell, buy in zip(fills, fills[1:]):
+        if (sell["kind"] == "sell" and buy["kind"] == "buy"
+                and sell["src"] == buy["dst"]
+                and _parse_ts(sell["time"]) == _parse_ts(buy["time"])
+                and sell.get("extrinsic")
+                and sell["extrinsic"] == buy.get("extrinsic")
+                and sell["netuid"] == buy["netuid"]
+                and sell["alpha"] == buy["alpha"] and sell["tao"] == buy["tao"]
+                and isinstance(sell.get("event_index"), int)
+                and buy.get("event_index") == sell["event_index"] + 1):
+            yield sell, buy
+
+
+def matching_reallocation_ids(events):
+    """Native extrinsics worth checking before trusting a same-wallet move."""
+    unique = {e["id"]: e for e in events}
+    return {sell["extrinsic"] for sell, _ in _reallocation_pairs(
+        unique.values())}
+
+
+def net_transfers(events, *, verified_moves=()):
     """Count matching in/out observations once per actual movement.
 
     Stable row IDs deduplicate repeat scans. Distinct equal movements in a
@@ -61,6 +89,13 @@ def net_transfers(events):
     """
     groups = defaultdict(list)
     unique = {e["id"]: e for e in events}
+    for sell, buy in _reallocation_pairs(unique.values()):
+        verified = sell["extrinsic"] in verified_moves
+        unique[sell["id"]] = dict(
+            sell, kind="stake_reallocation", dst=buy["dst"],
+            paired_event_id=buy["id"], evidence=(
+                "native_move" if verified else "matching_trade_legs"))
+        del unique[buy["id"]]
     result = []
     for e in unique.values():
         if e["kind"] not in ("stake_transfer", "tao_transfer"):
@@ -98,7 +133,7 @@ def _unexplained(activity, address, netuid, start, end):
 
 def _link(src, dst, gain, netuid, certain):
     qty = min(-src.delta, gain)
-    when = min(src.current["time"], dst["time"])
+    when = min(src.current["time"], dst["time"]).isoformat()
     return dict(id="snapshot/%s/%s/%s/%s" % (
         src.current["batch"], src.current["address"], dst["address"], netuid),
         time=when, src=src.current["address"], dst=dst["address"],
@@ -162,12 +197,13 @@ def inferred_links(checkpoints, events):
     for e in events:
         for a in (e["src"], e["dst"]):
             if a and e["netuid"] is not None:
-                activity[a, e["netuid"]].append(e["time"])
+                activity[a, e["netuid"]].append(_parse_ts(e["time"]))
     for times in activity.values():
         times.sort()
     changes = defaultdict(list)
     previous, first = {}, {}
-    for p in sorted(checkpoints, key=lambda x: (x["time"], x["address"])):
+    dated = (dict(p, time=_parse_ts(p["time"])) for p in checkpoints)
+    for p in sorted(dated, key=lambda x: (x["time"], x["address"])):
         addr = p["address"]
         first.setdefault(addr, p)
         old = previous.get(addr)
@@ -186,6 +222,20 @@ def inferred_links(checkpoints, events):
     return sorted(links, key=_chain_order)
 
 
+@dataclass(frozen=True)
+class _Purchase:
+    address: str
+    time: str
+    event_id: str
+    extrinsic: str
+    unit_price: float
+
+
+def _origin_order(item):
+    (purchase, estimated), qty = item
+    return -qty, purchase.time, purchase.event_id, estimated
+
+
 @dataclass
 class _Holding:
     alpha: float = 0.
@@ -193,6 +243,9 @@ class _Holding:
     cost: float = 0.
     probable: float = 0.
     estimated_cost: float = 0.
+    # Sampled purchases explain basis without changing the aggregate ledger.
+    # Key is (original buy, basis estimated somewhere along its path).
+    origins: dict = field(default_factory=dict)
 
     def remove(self, qty):
         # Unknown units and both kinds of cost move in the same proportion
@@ -201,6 +254,10 @@ class _Holding:
         share = min(qty / self.alpha, 1.) if self.alpha else 0.
         portion = _Holding(qty, self.known * share, self.cost * share,
                            self.probable * share, self.estimated_cost * share)
+        for origin, units in self.origins.items():
+            portion.origins[origin] = units * share
+        self.origins = {origin: units * (1. - share)
+                        for origin, units in self.origins.items() if share < 1}
         self.alpha = max(0., self.alpha - qty)
         self.known *= 1. - share
         self.cost *= 1. - share
@@ -214,11 +271,25 @@ class _Holding:
         self.cost += part.cost
         self.probable += part.probable
         self.estimated_cost += part.estimated_cost
+        for key, qty in part.origins.items():
+            self.origins[key] = self.origins.get(key, 0.) + qty
+        if len(self.origins) > 5:
+            self.origins = dict(sorted(self.origins.items(),
+                                       key=_origin_order)[:5])
 
     def observe(self, qty):
         if qty < self.alpha:
             self.remove(self.alpha - qty)
         self.alpha = qty
+
+    def mark_probable(self):
+        self.probable += self.known
+        self.estimated_cost += self.cost
+        self.known = self.cost = 0.
+        origins = defaultdict(float)
+        for (purchase, _), qty in self.origins.items():
+            origins[purchase, True] += qty
+        self.origins = dict(origins)
 
     def as_position(self, addr, netuid):
         priced = self.known + self.probable
@@ -251,6 +322,9 @@ def _opening_inventory(timeline):
             seen.add(addr)
         elif e["alpha"]:
             src, dst = _inventory_endpoints(e)
+            if e["kind"] == "stake_reallocation" and src not in seen:
+                key = src, e["netuid"]
+                minimum[key] = min(minimum[key], net[key] - e["alpha"])
             if src == dst:
                 continue
             for addr, sign in ((src, -1), (dst, 1)):
@@ -271,18 +345,121 @@ def _fully_priced(alpha, known):
 
 
 def _sale_stats():
-    return dict(wins=0, priced_sales=0, unpriced_sales=0, realized_tao=0.)
+    return dict(wins=0, priced_sales=0, unpriced_sales=0, realized_tao=0.,
+                partial_sales=0, known_sale_proceeds_tao=0.,
+                known_sale_cost_tao=0., unresolved_sale_proceeds_tao=0.)
 
 
-def portfolio(events, checkpoints, *, subnet_stats=None):
+def _record_sale(event, sold, totals):
+    # Weighted-average lots split both the cost and the proceeds of a
+    # partial sale proportionally. Only a completely priced sale can win.
+    proceeds = event["tao"]
+    fully_priced = _fully_priced(sold.alpha, sold.known)
+    share = 1. if fully_priced else min(1., sold.known / sold.alpha)
+    known_proceeds = proceeds * share
+    pnl = known_proceeds - sold.cost if share else None
+    unresolved = proceeds - known_proceeds
+    totals["known_sale_proceeds_tao"] += known_proceeds
+    totals["known_sale_cost_tao"] += sold.cost
+    totals["unresolved_sale_proceeds_tao"] += unresolved
+    if fully_priced:
+        totals["priced_sales"] += 1
+        totals["realized_tao"] += pnl
+        totals["wins"] += pnl > 1e-12
+        status = "fully_priced"
+    else:
+        totals["unpriced_sales"] += 1
+        totals["partial_sales"] += bool(share)
+        status = "partially_priced" if share else "unpriced"
+    return dict(id=event["id"], time=event["time"],
+                extrinsic=event.get("extrinsic"),
+                event_index=event.get("event_index"), address=event["src"],
+                netuid=event["netuid"], alpha=sold.alpha,
+                proceeds_tao=proceeds,
+                basis_status=status, known_alpha=sold.known,
+                known_proceeds_tao=known_proceeds, known_cost_tao=sold.cost,
+                known_realized_tao=pnl, probable_alpha=sold.probable,
+                probable_cost_tao=sold.estimated_cost,
+                unknown_alpha=max(0., sold.alpha - sold.known - sold.probable),
+                unresolved_proceeds_tao=unresolved)
+
+
+def _finish_sales(s):
+    has_cost = s["priced_sales"] or s["partial_sales"]
+    pnl = s["known_sale_proceeds_tao"] - s["known_sale_cost_tao"]
+    s["known_realized_tao"] = round(pnl, 9) if has_cost else None
+    for key in ("realized_tao", "known_sale_proceeds_tao",
+                "known_sale_cost_tao", "unresolved_sale_proceeds_tao"):
+        s[key] = round(s[key], 9)
+
+
+def _transfer_receipt(e, part):
+    row = {key: e.get(key) for key in (
+        "id", "time", "extrinsic", "src", "dst", "netuid", "alpha", "tao",
+        "evidence", "transfer_side", "confidence", "kind")}
+    row["origins"] = []
+    inherited = entry = None
+    if e["kind"] == "tao_transfer":
+        return dict(row, basis_status="native_tao",
+                    inherited_buy_price_tao=None,
+                    known_alpha=None, known_cost_tao=None,
+                    known_buy_price_tao=None, probable_alpha=None,
+                    probable_cost_tao=None, unknown_alpha=None,
+                    other_origin_alpha=None, other_origin_cost_tao=None)
+    for (purchase, estimated), units in sorted(part.origins.items(),
+                                               key=_origin_order):
+        if units <= 0:
+            continue
+        row["origins"].append(dict(
+            address=purchase.address, time=purchase.time,
+            event_id=purchase.event_id, extrinsic=purchase.extrinsic or None,
+            unit_buy_price_tao=purchase.unit_price, alpha=units,
+            cost_tao=purchase.unit_price * units,
+            basis_status="estimated" if estimated else "confirmed"))
+    priced = part.known + part.probable
+    cost = part.cost + part.estimated_cost
+    if part.known:
+        entry = part.cost / part.known
+    side = e.get("transfer_side")
+    if side == "unknown" or e["src"] == e["dst"]:
+        status = "direction_unknown"
+    elif side == "out" or not e["dst"]:
+        status = "debit_only"
+    elif side == "in" or not e["src"]:
+        status = "credit_only"
+    elif not priced:
+        status = "unknown"
+    elif not _fully_priced(part.alpha, priced):
+        status = "partial"
+    else:
+        inherited = cost / priced
+        status = "estimated" if part.probable else "confirmed"
+    sampled_qty = sum(o["alpha"] for o in row["origins"])
+    sampled_cost = sum(o["cost_tao"] for o in row["origins"])
+    return dict(
+        row, basis_status=status, inherited_buy_price_tao=inherited,
+        known_alpha=part.known, known_cost_tao=part.cost,
+        known_buy_price_tao=entry, probable_alpha=part.probable,
+        probable_cost_tao=part.estimated_cost,
+        unknown_alpha=max(0., part.alpha - priced),
+        other_origin_alpha=max(0., priced - sampled_qty),
+        other_origin_cost_tao=max(0., cost - sampled_cost))
+
+
+def portfolio(events, checkpoints, *, subnet_stats=None, sale_details=None,
+              transfer_details=None):
     """Replay once; optionally write the per-wallet/subnet sale breakdown
     into the supplied mapping."""
     events = sorted(events, key=_chain_order)
-    timeline = [(e["time"], False, e) for e in events]
-    timeline.extend((p["time"], True, p) for p in checkpoints)
+    timeline = [(_parse_ts(e["time"]), False, e) for e in events]
+    timeline.extend((_parse_ts(p["time"]), True, p) for p in checkpoints)
     timeline.sort(key=lambda item: item[:2])
     lots = _opening_inventory(timeline)
     sales = defaultdict(_sale_stats)
+    if sale_details is not None:
+        sale_details.clear()
+    if transfer_details is not None:
+        transfer_details.clear()
     for _, is_snapshot, e in timeline:
         if is_snapshot:
             addr = e["address"]
@@ -291,67 +468,92 @@ def portfolio(events, checkpoints, *, subnet_stats=None):
                 lots[addr, n].observe(e["units"].get(n, 0))
             continue
         qty, n = e["alpha"], e["netuid"]
+        if e["kind"] == "tao_transfer":
+            if transfer_details is not None:
+                transfer_details.append(_transfer_receipt(e, None))
+            continue
         src, dst = _inventory_endpoints(e)
+        if e["kind"] == "stake_reallocation":
+            lot = lots[src, n]
+            lot.observe(max(lot.alpha, qty))
+            if e["evidence"] != "native_move":
+                # Both sides cancel economically, but this could be a real
+                # sale and re-entry. The old cost on these units is only
+                # an estimate until the native call resolves the ambiguity.
+                part = lot.remove(qty)
+                part.mark_probable()
+                lot.add(part)
+            continue
         if e.get("transfer_side") == "unknown":
             # Older self-transfer rows can lack direction. Their previous
             # cost can no longer support a priced sale on this subnet.
             key = e["owner"], n
             lots[key] = _Holding(lots[key].alpha)
         if not qty or src == dst:
+            if (transfer_details is not None and qty
+                    and e["kind"] == "stake_transfer"):
+                transfer_details.append(_transfer_receipt(e, _Holding(qty)))
             continue
         moved = _Holding(qty)
         if src:
             moved = lots[src, n].remove(qty)
         if e["kind"] == "sell":
-            s = sales[src, n]
-            if _fully_priced(qty, moved.known):
-                pnl = e["tao"] - moved.cost
-                s["realized_tao"] += pnl
-                s["priced_sales"] += 1
-                s["wins"] += pnl > 1e-12
-            else:
-                s["unpriced_sales"] += 1
+            detail = _record_sale(e, moved, sales[src, n])
+            if sale_details is not None:
+                sale_details.append(detail)
         elif dst:
             if e["kind"] == "buy":
                 moved = _Holding(qty, qty, e["tao"])
+                if transfer_details is not None:
+                    purchase = _Purchase(dst, e["time"], e["id"],
+                                         e.get("extrinsic") or "",
+                                         e["tao"] / qty)
+                    moved.origins[purchase, False] = qty
             elif e["evidence"] == "snapshot_match":
-                moved.probable += moved.known
-                moved.estimated_cost += moved.cost
-                moved.known = moved.cost = 0.
+                moved.mark_probable()
             lots[dst, n].add(moved)
+        if transfer_details is not None and e["kind"] == "stake_transfer":
+            transfer_details.append(_transfer_receipt(e, moved))
     positions = {key: lot.as_position(*key) for key, lot in lots.items()
                  if lot.alpha > 1e-12}
     stats = defaultdict(_sale_stats)
     for (addr, _), s in sales.items():
-        for field, value in s.items():
-            stats[addr][field] += value
-        s["realized_tao"] = round(s["realized_tao"], 9)
+        for key, value in s.items():
+            stats[addr][key] += value
+        _finish_sales(s)
     if subnet_stats is not None:
         subnet_stats.clear()
         subnet_stats.update(sales)
     for s in stats.values():
-        s["realized_tao"] = round(s["realized_tao"], 9)
+        _finish_sales(s)
     return positions, stats
 
 
-def timing_observations(events, prices):
+def timing_observations(events, prices, *, with_timestamp=False):
     """Yield each trade and the first subnet quote 24 to 30 hours later."""
     quotes = defaultdict(list)
     for p in prices:
         if p["price_tao"] and p["price_tao"] > 0:
             quotes[p["netuid"]].append((
-                datetime.fromisoformat(p["fetched_at"]), p["price_tao"]))
+                _parse_ts(p["fetched_at"]), p["price_tao"],
+                _parse_ts(p.get("registered_at"))))
     for rows in quotes.values():
-        rows.sort()
+        rows.sort(key=lambda row: row[0])
     for e in events:
         if e["kind"] not in ("buy", "sell") or not e["alpha"] or not e["tao"]:
             continue
-        start = datetime.fromisoformat(e["time"]) + timedelta(hours=24)
+        traded = _parse_ts(e["time"])
+        start = traded + timedelta(hours=24)
         rows = quotes[e["netuid"]]
         i = bisect_left(rows, (start,))
         if i == len(rows) or rows[i][0] > start + timedelta(hours=6):
             continue
-        yield e, rows[i][1]
+        at, price, registered = rows[i]
+        if registered is None or registered <= traded:
+            if with_timestamp:
+                yield e, price, at.astimezone(timezone.utc).isoformat()
+            else:
+                yield e, price
 
 
 def timing(events, prices):

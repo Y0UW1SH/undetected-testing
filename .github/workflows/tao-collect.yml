@@ -1,6 +1,10 @@
 name: Bittensor wallet collection
 
 on:
+  # Refresh indexed evidence for just the watchlist. Five-minute movement
+  # checks run on the user's computer; this workflow only uses Taostats.
+  schedule:
+    - cron: "41 3 * * *"
   workflow_dispatch:
     inputs:
       runner:
@@ -23,6 +27,9 @@ on:
         default: "20"
       addresses:
         description: "Additional wallet addresses, comma-separated (optional)"
+        type: string
+      watch_addresses:
+        description: "Add these wallets to the persistent watchlist (comma-separated)"
         type: string
       extrinsics:
         description: "Known native extrinsics to verify (space-separated, optionally ID:event,event)"
@@ -95,38 +102,62 @@ jobs:
           echo "REPORT=$report" >> "$env_file"
           echo "TAO_DIAGNOSTIC_DIR=$temp_dir/tao-wallet-report" >> "$env_file"
 
+      - name: Check scheduled watchlist
+        id: watchlist
+        if: github.event_name == 'schedule'
+        shell: python
+        run: |
+          import os, sqlite3
+          from pathlib import Path
+          path = Path(os.environ["TAO_DB"])
+          populated = False
+          if path.is_file():
+              with sqlite3.connect(path) as db:
+                  table = db.execute("SELECT 1 FROM sqlite_master WHERE name='followed_wallets'").fetchone()
+                  populated = bool(table and db.execute("SELECT 1 FROM followed_wallets LIMIT 1").fetchone())
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              print(f"skip={str(not populated).lower()}", file=out)
+
       - uses: actions/setup-python@v6
+        if: steps.watchlist.outputs.skip != 'true'
         with:
           python-version: "3.14"
           cache: pip
           cache-dependency-path: requirements.txt
 
       - name: Install dependencies
+        if: steps.watchlist.outputs.skip != 'true'
         run: python -m pip install -r requirements.txt
 
       - name: Collect wallet and subnet data
+        if: steps.watchlist.outputs.skip != 'true'
         env:
           NETUIDS: ${{ inputs.netuids }}
-          SUBNETS: ${{ inputs.subnets }}
-          TOP: ${{ inputs.top }}
+          SUBNETS: ${{ inputs.subnets || '1' }}
+          TOP: ${{ inputs.top || '1' }}
           ADDRESSES: ${{ inputs.addresses }}
-          ADDRESSES_ONLY: ${{ inputs.addresses_only }}
+          WATCH_ADDRESSES: ${{ inputs.watch_addresses }}
+          ADDRESSES_ONLY: ${{ github.event_name == 'schedule' || inputs.addresses_only }}
           EXTRINSICS: ${{ inputs.extrinsics }}
-          NEW_WALLETS: ${{ inputs.new_wallets }}
-          HISTORY_PAGES: ${{ inputs.history_pages }}
-          TAO_DELAY: ${{ inputs.delay }}
-          FOLLOW_TOP: ${{ inputs.follow_top }}
+          NEW_WALLETS: ${{ inputs.new_wallets || '2' }}
+          HISTORY_PAGES: ${{ inputs.history_pages || '4' }}
+          TAO_DELAY: ${{ inputs.delay || '1-2' }}
+          FOLLOW_TOP: ${{ inputs.follow_top || '0' }}
           TAO_PROXY: ${{ secrets.TAO_PROXY }}
         shell: bash
         run: |
           args=(collect --subnets "$SUBNETS" --top "$TOP" --new-wallets "$NEW_WALLETS"
                 --history-pages "$HISTORY_PAGES" --follow-top "$FOLLOW_TOP"
                 --out "$REPORT")
-          if [[ "$ADDRESSES_ONLY" == "true" ]]; then args+=(--addresses-only); fi
+          if [[ "$ADDRESSES_ONLY" == "true" ]]; then args+=(--addresses-only --history-charts 2); fi
           if [[ -n "$NETUIDS" ]]; then args+=(--netuids "$NETUIDS"); fi
           if [[ -n "$ADDRESSES" ]]; then
             IFS=, read -ra addresses <<< "$ADDRESSES"
             for address in "${addresses[@]}"; do args+=(--address "$address"); done
+          fi
+          if [[ -n "$WATCH_ADDRESSES" ]]; then
+            IFS=, read -ra watched <<< "$WATCH_ADDRESSES"
+            for address in "${watched[@]}"; do args+=(--watch-address "$address"); done
           fi
           if [[ -n "$EXTRINSICS" ]]; then
             read -ra refs <<< "$EXTRINSICS"
@@ -142,6 +173,7 @@ jobs:
           fi
 
       - name: Summarize coverage and trading results
+        if: steps.watchlist.outputs.skip != 'true'
         env:
           PYTHONPATH: ${{ github.workspace }}
         shell: python
@@ -190,15 +222,6 @@ jobs:
               if priced:
                   print(f"\nStored history includes {priced} priced sales and "
                         f"{unpriced} unpriced sales.", file=out)
-                  print("\n### Traders by gross realized P/L\n", file=out)
-                  print("| Wallet | Gross P/L (TAO) | Wins / priced sales | Unpriced sales | "
-                        "Favorable / evaluated trades at 24h |", file=out)
-                  print("| --- | ---: | ---: | ---: | ---: |", file=out)
-                  for trader in report["traders"][:10]:
-                      t = trader["timing"]
-                      print(f"| {account(trader['address'])} | {trader['realized_tao']:+.6g} | "
-                            f"{trader['wins']} / {trader['priced_sales']} | {trader['unpriced_sales']} | "
-                            f"{t['favorable']} / {t['evaluated']} |", file=out)
               else:
                   print(f"\nNo priced sales in stored history. Unpriced sales: {unpriced}.", file=out)
 
@@ -225,6 +248,7 @@ jobs:
               append_summary(report, out)
 
       - name: Save wallet history
+        if: steps.watchlist.outputs.skip != 'true'
         shell: bash
         run: |
           state=$(dirname "$TAO_DB")
@@ -238,7 +262,7 @@ jobs:
           fi
 
       - name: Upload wallet results
-        if: ${{ !cancelled() && env.REPORT != '' }}
+        if: ${{ !cancelled() && env.REPORT != '' && steps.watchlist.outputs.skip != 'true' }}
         uses: actions/upload-artifact@v6
         with:
           name: wallet-collection
@@ -250,6 +274,7 @@ jobs:
           retention-days: 3
 
       - name: Check wallet history coverage
+        if: steps.watchlist.outputs.skip != 'true'
         shell: python
         run: |
           import json

@@ -1,5 +1,6 @@
 """Wallet collection and accounting regressions, using offline page data."""
 import json
+import pytest
 
 from seo import storage, tao_cli
 from seo.sources import tao_history
@@ -10,6 +11,37 @@ A = "5" + "A" * 47
 B = "5" + "B" * 47
 C = "5" + "C" * 47
 DAY = "2026-10-01T00:00:00Z"
+
+
+@pytest.fixture(autouse=True)
+def holder_page(monkeypatch):
+    # No investor grid in these account fixtures. The holder parser and its
+    # live UI states have their own tests.
+    from seo.sources import tao_holders
+    monkeypatch.setattr(tao_holders, "fetch_holders",
+                        lambda *args, **kwargs: ([], "unavailable"))
+
+
+def test_discovery_can_find_holders_who_made_no_recent_trades(
+        fake_env, monkeypatch):
+    from seo.sources import tao_holders
+    original = fakes.google_router
+    monkeypatch.setattr(tao_holders, "fetch_holders",
+                        lambda *args, **kwargs: ([B], "partial"))
+    monkeypatch.setattr(site, "fetch_metagraph", lambda *args: [])
+    monkeypatch.setattr(tao_history, "fetch_recent_trades",
+                        lambda s: ([], "unavailable"))
+    monkeypatch.setattr(tao_history, "fetch_history",
+                        lambda *args, **kwargs: ([], "complete"))
+    monkeypatch.setattr(fakes, "google_router", lambda url: (
+        ("", account(B)) if "/account/" in url else original(url)))
+    assert tao_cli.main(["--db", fake_env["db"], "collect", "--netuids", "8",
+                         "--top", "1", "--out", "holders.json"]) == 0
+    with open("holders.json", encoding="utf8") as f:
+        report = json.load(f)
+    assert report["candidates"] == [B]
+    assert report["discovery_sources"][B] == ["Taostats holders: SN8"]
+    assert report["holders"]["8"]["status"] == "partial"
 
 
 def flight(name, rows):

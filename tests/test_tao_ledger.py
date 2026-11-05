@@ -6,6 +6,67 @@ def day(n):
     return "2026-10-%02dT00:00:00+00:00" % n
 
 
+def test_transfer_details_trace_weighted_purchases_through_two_wallets():
+    buys = [event(1, "buy", None, "a", 10, 2, extrinsic="1-1"),
+            event(2, "buy", None, "a", 10, 4, extrinsic="2-1")]
+    events = buys + [event(3, "stake_transfer", None, "a", 10),
+                     event(4, "stake_transfer", "a", "b", 12),
+                     event(5, "buy", None, "b", 4, 2, extrinsic="5-1"),
+                     event(6, "stake_transfer", "b", "c", 8)]
+    details = []
+    positions, _ = portfolio(events, [], transfer_details=details)
+    one, two = details[-2:]
+    assert one["known_alpha"] == 8 and one["unknown_alpha"] == 4
+    assert abs(one["known_buy_price_tao"] - .3) < 1e-12
+    assert two["known_alpha"] == 6 and two["unknown_alpha"] == 2
+    assert abs(two["known_cost_tao"] - 2.2) < 1e-12
+    assert two["inherited_buy_price_tao"] is None
+    assert two["basis_status"] == "partial"
+    assert positions["c", 8]["known_alpha"] == two["known_alpha"]
+    origins = {o["extrinsic"]: o for o in two["origins"]}
+    assert {x: (o["address"], o["alpha"]) for x, o in origins.items()} == {
+        "1-1": ("a", 2), "2-1": ("a", 2), "5-1": ("b", 2)}
+    assert abs(sum(o["cost_tao"] for o in origins.values()) - 2.2) < 1e-12
+    assert all(o["basis_status"] == "confirmed" for o in origins.values())
+
+
+def test_transfer_details_separate_estimates_unpaired_and_native_tao():
+    events = [event(1, "buy", None, "a", 10, 5, extrinsic="1-1"),
+              dict(event(2, "stake_transfer", "a", "b", 4),
+                   evidence="snapshot_match", confidence=.88),
+              event(3, "stake_transfer", "b", "c", 2),
+              event(4, "stake_transfer", "a", "x", 1, transfer_side="out"),
+              event(5, "tao_transfer", "b", "c", None, 10)]
+    details = []
+    portfolio(events, [], transfer_details=details)
+    assert details[0]["basis_status"] == "estimated"
+    assert details[0]["confidence"] == .88
+    for row in details[:2]:
+        assert row["inherited_buy_price_tao"] == .5
+        assert row["known_alpha"] == 0
+        assert row["origins"][0]["basis_status"] == "estimated"
+        assert row["origins"][0]["extrinsic"] == "1-1"
+    assert details[2]["basis_status"] == "debit_only"
+    assert details[2]["inherited_buy_price_tao"] is None
+    assert details[3]["basis_status"] == "native_tao"
+    assert details[3]["origins"] == []
+
+
+def test_bounded_origin_sample_preserves_unsampled_cost_and_units():
+    buys = [event(i, "buy", None, "a", 1, i, extrinsic=f"{i}-1")
+            for i in range(1, 8)]
+    moves = [event(8, "stake_transfer", "a", "b", 7),
+             event(9, "stake_transfer", "b", "c", 3.5)]
+    details = []
+    portfolio(buys + moves, [], transfer_details=details)
+    row = details[-1]
+    assert len(row["origins"]) == 5
+    assert row["known_alpha"] == 3.5 and row["inherited_buy_price_tao"] == 4
+    assert row["other_origin_alpha"] == 1
+    assert (sum(o["cost_tao"] for o in row["origins"])
+            + row["other_origin_cost_tao"] == 14)
+
+
 def event(n, kind, src, dst, alpha, tao=None, **fields):
     return dict(time=day(n), kind=kind, src=src, dst=dst, netuid=8,
                 alpha=alpha, tao=tao, evidence="transaction",
@@ -183,8 +244,9 @@ def test_realized_breakdown_separates_subnets_from_mixed_wallet_result():
     by_subnet = {}
     _, stats = portfolio(trades, [], subnet_stats=by_subnet)
     assert stats["a"]["realized_tao"] == -0.5
-    assert by_subnet["a", 8] == dict(priced_sales=1, wins=1,
-                                     unpriced_sales=0, realized_tao=0.5)
+    sn8 = by_subnet["a", 8]
+    assert (sn8["priced_sales"], sn8["wins"], sn8["unpriced_sales"],
+            sn8["realized_tao"]) == (1, 1, 0, 0.5)
     assert by_subnet["a", 9]["realized_tao"] == -1
     assert by_subnet["a", 10]["priced_sales"] == 0
     assert by_subnet["a", 10]["unpriced_sales"] == 1
@@ -198,3 +260,112 @@ def test_observation_iteration_returns_each_trade_and_first_eligible_quote():
               dict(netuid=8, price_tao=0.15, fetched_at=day(4))]
     assert list(timing_observations([buy, sell], quotes)) == [
         (buy, 0.95), (sell, 0.15)]
+
+
+def test_sale_breakdown_attributes_only_the_known_fraction():
+    purchases = [event(1, "buy", None, "a", 5, 2),
+                 event(2, "stake_transfer", None, "a", 5),
+                 event(3, "sell", "a", None, 4, 4, extrinsic="123-0001")]
+    lots, by_subnet, details = [], {}, []
+    _, stats = portfolio(purchases, lots, subnet_stats=by_subnet,
+                         sale_details=details)
+    sale, = details
+    assert sale["extrinsic"] == "123-0001"
+    assert sale["basis_status"] == "partially_priced"
+    assert sale["known_alpha"] == sale["unknown_alpha"] == 2
+    assert sale["known_cost_tao"] == 0.8
+    assert sale["known_proceeds_tao"] == sale["unresolved_proceeds_tao"] == 2
+    assert sale["known_realized_tao"] == 1.2
+    a = stats["a"]
+    assert a == by_subnet["a", 8]
+    assert a["known_realized_tao"] == 1.2
+    assert a["known_sale_cost_tao"] == 0.8
+    assert a["unresolved_sale_proceeds_tao"] == 2
+    assert a["partial_sales"] == a["unpriced_sales"] == 1
+    assert a["realized_tao"] == a["wins"] == a["priced_sales"] == 0
+
+
+def test_sale_coverage_distinguishes_unknown_cost_zero_pnl_and_estimates():
+    events = [event(1, "buy", None, "a", 12, 3),
+              dict(event(2, "stake_transfer", "a", "b", 4),
+                   evidence="snapshot_match"),
+              event(3, "sell", "b", None, 2, 5),
+              event(4, "sell", "a", None, 8, 2),
+              dict(event(5, "sell", "a", None, 1, 6), netuid=12)]
+    sales = []
+    _, stats = portfolio(events, [], sale_details=sales)
+    estimated, even, unknown = sales
+    assert estimated["known_realized_tao"] is None
+    assert estimated["probable_alpha"] == 2
+    assert estimated["probable_cost_tao"] == 0.5
+    assert stats["b"]["known_realized_tao"] is None
+    assert even["known_realized_tao"] == 0
+    assert stats["a"]["known_realized_tao"] == 0
+    assert unknown["basis_status"] == "unpriced"
+    assert unknown["unknown_alpha"] == 1
+    assert stats["a"]["known_sale_proceeds_tao"] == 2
+    assert stats["a"]["unresolved_sale_proceeds_tao"] == 6
+
+
+def test_matched_reallocation_legs_do_not_reset_entry_or_score_trades():
+    buy = event(1, "buy", None, "a", 10, 5)
+    sell_leg = event(2, "sell", "a", None, 4, 4, id="debit",
+                     extrinsic="500-0020", event_index=51)
+    buy_leg = event(2, "buy", None, "a", 4, 4, id="credit",
+                    extrinsic="500-0020", event_index=52)
+    real_sale = event(3, "sell", "a", None, 2, 1.8)
+    rows = [buy_leg, real_sale, sell_leg, buy]
+    from seo.tao_ledger import matching_reallocation_ids
+    assert matching_reallocation_ids(rows) == {"500-0020"}
+    for verified in [True, False]:
+        movements = net_transfers(rows, verified_moves={"500-0020"}
+                                  if verified else set())
+        move, = [e for e in movements if e["kind"] == "stake_reallocation"]
+        assert move["paired_event_id"] == "credit"
+        assert move["evidence"] == (
+            "native_move" if verified else "matching_trade_legs")
+        positions, stats = portfolio(movements, [])
+        assert positions["a", 8]["alpha"] == 8
+        assert stats["a"]["priced_sales"] + stats["a"]["unpriced_sales"] == 1
+        assert stats["a"]["wins"] == int(verified)
+        assert stats["a"]["known_realized_tao"] == (0.8 if verified else 0.48)
+
+
+def test_nonconsecutive_or_unequal_fills_are_preserved_as_trades():
+    sell = event(2, "sell", "a", None, 4, 3, id="s", extrinsic="5-0003",
+                 event_index=11)
+    buy = event(2, "buy", None, "a", 4, 3, id="b", extrinsic="5-0003",
+                event_index=12)
+    for changed in (dict(buy, alpha=4.01), dict(buy, tao=3.0001),
+                    dict(buy, event_index=14), dict(buy, netuid=9),
+                    dict(buy, dst="b"), dict(buy, time=day(3))):
+        movements = net_transfers([sell, changed])
+        assert sorted(e["kind"] for e in movements) == ["buy", "sell"]
+
+
+def test_quote_after_subnet_reregistration_cannot_score_legacy_trade():
+    buy = event(1, "buy", None, "a", 5, 1)
+    sell = event(4, "sell", "a", None, 2, 2)
+    prices = [dict(netuid=8, fetched_at=day(2), price_tao=3,
+                   registered_at="2026-10-01T16:00:00Z"),
+              dict(netuid=8, fetched_at=day(5), price_tao=0.5,
+                   registered_at="2026-10-01T16:00:00Z")]
+    assert timing([buy, sell], prices)["a"] == {"evaluated": 1, "favorable": 1}
+
+
+def test_replay_orders_equivalent_offset_timestamps_by_chain_time():
+    buy = dict(event(1, "buy", None, "a", 8, 4), time="2026-10-01T00:00:00Z")
+    sell = dict(event(1, "sell", "a", None, 8, 8),
+                time="2026-10-01T00:00:00.001000+00:00")
+    _, stats = portfolio([sell, buy], [])
+    assert stats["a"]["wins"] == 1
+    assert stats["a"]["realized_tao"] == 4
+
+
+def test_timing_proof_retains_time_of_selected_quote():
+    from seo.tao_ledger import timing_observations
+    e = event(1, "buy", None, "a", 1, 1)
+    mark = "2026-10-02T02:25:00+00:00"
+    prices = [dict(netuid=8, fetched_at=mark, price_tao=2)]
+    assert list(timing_observations([e], prices, with_timestamp=True)) == [
+        (e, 2, mark)]
