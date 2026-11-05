@@ -85,5 +85,9 @@ jobs:
             echo "No data changes to commit."
           else
             git commit -m "Update product research data [skip ci]"
-            git push
+            # Other workflows commit data too; rebase and retry.
+            for attempt in 1 2 3 4 5; do
+              git pull --rebase origin master && git push && break
+              echo "push attempt $attempt failed; retrying"; sleep 10
+            done
           fi
