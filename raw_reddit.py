@@ -1,7 +1,7 @@
 """Reddit Search / Bypasses reCAPTCHA."""
 from seleniumbase import SB
 
-with SB(uc=True, test=True, use_chromium=True) as sb:
+with SB(uc=True, test=True, rtf=True, use_chromium=True) as sb:
     search = "reddit+scraper"
     url = f"https://www.reddit.com/r/webscraping/search/?q={search}"
     sb.activate_cdp_mode(url)

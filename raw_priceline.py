@@ -1,7 +1,9 @@
 """Priceline does a lot of A/B testing. Selectors change frequently."""
 from seleniumbase import SB
 
-with SB(uc=True, test=True, locale="en", guest=True, pls="none") as sb:
+with SB(
+    uc=True, test=True, rtf=True, locale="en", guest=True, pls="none"
+) as sb:
     sb.activate_cdp_mode()
     sb.goto("https://www.priceline.com")
     sb.sleep(3)

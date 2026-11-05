@@ -1,6 +1,6 @@
 from seleniumbase import SB
 
-with SB(uc=True, test=True) as sb:
+with SB(uc=True, test=True, rtf=True) as sb:
     url = "https://seleniumbase.io/apps/turnstile"
     sb.uc_open_with_reconnect(url)
     sb.uc_gui_click_captcha()

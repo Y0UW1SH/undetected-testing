@@ -1,6 +1,6 @@
 from seleniumbase import SB
 
-with SB(uc=True, test=True, incognito=True) as sb:
+with SB(uc=True, test=True, rtf=True, incognito=True) as sb:
     sb.goto("https://seleniumbase.io/hobbit/login")
     sb.sleep(1)
     sb.click("button span#mySpan")
@@ -10,7 +10,7 @@ with SB(uc=True, test=True, incognito=True) as sb:
     sb.set_messenger_theme(location="bottom_center")
     sb.post_message("SeleniumBase wasn't detected!")
 
-with SB(uc=True, test=True, incognito=True) as sb:
+with SB(uc=True, test=True, rtf=True, incognito=True) as sb:
     sb.goto("https://www.virtualmanager.com/en/login")
     sb.sleep(1.5)
     print(sb.get_page_title())

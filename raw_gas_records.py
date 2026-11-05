@@ -1,7 +1,7 @@
 """(Bypasses the Imperva/Incapsula hCaptcha)"""
 from seleniumbase import SB
 
-with SB(uc=True, test=True) as sb:
+with SB(uc=True, test=True, rtf=True) as sb:
     url = (
         "https://www.gassaferegister.co.uk/gas-safety"
         "/gas-safety-certificates-records/building-regulations-certificate"

@@ -25,7 +25,7 @@ async def receive_handler(event: mycdp.network.ResponseReceived):
     print(event.response)
 
 
-with SB(uc=True, test=True, locale="en") as sb:
+with SB(uc=True, test=True, rtf=True, locale="en") as sb:
     sb.activate_cdp_mode("about:blank")
     sb.add_handler(mycdp.network.RequestWillBeSent, send_handler)
     sb.add_handler(mycdp.network.ResponseReceived, receive_handler)

@@ -1,6 +1,6 @@
 from seleniumbase import SB
 
-with SB(uc=True, test=True, incognito=True) as sb:
+with SB(uc=True, test=True, rtf=True, incognito=True) as sb:
     sb.activate_cdp_mode()
     sb.goto("https://www.glassdoor.com/Reviews/index.htm")
     sb.sleep(2.2)

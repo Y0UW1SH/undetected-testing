@@ -59,4 +59,8 @@ seo doctor --browser
 ### Also in this release
 
 * The stealth test scripts now assert success, and the ten CI workflows
-  are one matrix workflow with lint and unit-test jobs.
+  are one matrix workflow with lint and unit-test jobs. `SB()` scripts
+  pass `rtf=True` so a failed assertion exits non-zero (SeleniumBase's
+  test mode otherwise prints the failure and exits 0). Each script gets
+  a 10-minute limit in CI; Etsy's slider captcha once hung a macOS job
+  for 45 minutes.

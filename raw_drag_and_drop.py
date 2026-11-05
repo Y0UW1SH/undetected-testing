@@ -2,7 +2,7 @@ from seleniumbase import SB
 
 # UC Mode
 with SB(
-    uc=True, test=True, incognito=True, xvfb_metrics="1920,1080"
+    uc=True, test=True, rtf=True, incognito=True, xvfb_metrics="1920,1080"
 ) as sb:
     url = "https://seleniumbase.io/other/drag_and_drop"
     sb.uc_open_with_reconnect(url)
@@ -12,7 +12,7 @@ with SB(
     sb.sleep(1)
 
 # CDP Mode
-with SB(uc=True, test=True, incognito=True) as sb:
+with SB(uc=True, test=True, rtf=True, incognito=True) as sb:
     url = "https://seleniumbase.io/other/drag_and_drop"
     sb.activate_cdp_mode(url)
     sb.assert_element_not_visible("#div1 img#drag1")
@@ -22,7 +22,7 @@ with SB(uc=True, test=True, incognito=True) as sb:
 
 
 # CDP Mode reconnected
-with SB(uc=True, test=True, incognito=True) as sb:
+with SB(uc=True, test=True, rtf=True, incognito=True) as sb:
     url = "https://seleniumbase.io/other/drag_and_drop"
     sb.activate_cdp_mode(url)
     sb.reconnect()
@@ -33,7 +33,7 @@ with SB(uc=True, test=True, incognito=True) as sb:
 
 # CDP Mode reconnected with clean tab and custom code
 with SB(
-    uc=True, test=True, incognito=True, xvfb_metrics="1920,1080"
+    uc=True, test=True, rtf=True, incognito=True, xvfb_metrics="1920,1080"
 ) as sb:
     url = "https://seleniumbase.io/other/drag_and_drop"
     sb.activate_cdp_mode()

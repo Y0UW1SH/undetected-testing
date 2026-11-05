@@ -1,6 +1,6 @@
 from seleniumbase import SB
 
-with SB(uc=True, test=True, guest=True) as sb:
+with SB(uc=True, test=True, rtf=True, guest=True) as sb:
     sb.activate_cdp_mode(ad_block=True)
     sb.goto("https://pixelscan.net/fingerprint-check")
     sb.remove_element("div.header-promo")

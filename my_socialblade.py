@@ -1,7 +1,7 @@
 """Bypass bot-detection to view SocialBlade ranks for YouTube"""
 from seleniumbase import SB
 
-with SB(uc=True, test=True, ad_block=True, pls="none") as sb:
+with SB(uc=True, test=True, rtf=True, ad_block=True, pls="none") as sb:
     sb.activate_cdp_mode()
     sb.goto("https://socialblade.com/youtube/channel/UCSQElO8vQmNPuTgdd83BHdw")
     sb.sleep(3)

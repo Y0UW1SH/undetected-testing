@@ -1,6 +1,6 @@
 from seleniumbase import SB
 
-with SB(uc=True, test=True, locale="en") as sb:
+with SB(uc=True, test=True, rtf=True, locale="en") as sb:
     sb.activate_cdp_mode()
     sb.goto("https://www.nordstrom.com/")
     sb.sleep(2.2)

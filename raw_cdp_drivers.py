@@ -1,7 +1,7 @@
 # An example of switching between multiple drivers
 from seleniumbase import SB
 
-with SB(uc=True, test=True) as sb:
+with SB(uc=True, test=True, rtf=True) as sb:
     url1 = "https://seleniumbase.io/antibot/login"
     sb.activate_cdp_mode(url1)
     url2 = "https://seleniumbase.io/hobbit/login"

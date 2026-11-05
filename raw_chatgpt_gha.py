@@ -7,7 +7,7 @@ try:
 except Exception:
     proxy = None
 
-with SB(uc=True, test=True, proxy=proxy) as sb:
+with SB(uc=True, test=True, rtf=True, proxy=proxy) as sb:
     sb.activate_cdp_mode()
     sb.open("https://chatgpt.com/")
     sb.sleep(3)

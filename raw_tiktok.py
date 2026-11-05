@@ -1,6 +1,6 @@
 from seleniumbase import SB
 
-with SB(uc=True, test=True, guest=True) as sb:
+with SB(uc=True, test=True, rtf=True, guest=True) as sb:
     sb.activate_cdp_mode()
     sb.goto("https://www.tiktok.com/@startrek?lang=en")
     sb.sleep(2.5)

@@ -1,6 +1,6 @@
 from seleniumbase import SB
 
-with SB(uc=True, test=True, locale_code="en") as sb:
+with SB(uc=True, test=True, rtf=True, locale_code="en") as sb:
     sb.activate_cdp_mode()
     sb.goto("https://gitlab.com/users/sign_in")
     sb.sleep(2)

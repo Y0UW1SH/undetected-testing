@@ -1,6 +1,6 @@
 from seleniumbase import SB
 
-with SB(test=True) as sb:
+with SB(test=True, rtf=True) as sb:
     url = "https://my-user-agent.com/"
     sb.goto(url)
     sb.highlight("#ua_string")

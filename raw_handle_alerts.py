@@ -1,7 +1,7 @@
 """An example of handling alerts in CDP Mode."""
 from seleniumbase import SB
 
-with SB(uc=True, test=True) as sb:
+with SB(uc=True, test=True, rtf=True) as sb:
     sb.activate_cdp_mode()
     sb.goto("https://the-internet.herokuapp.com/javascript_alerts")
     sb.click('button[onclick="jsAlert()"]')
