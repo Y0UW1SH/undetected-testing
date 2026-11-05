@@ -1,0 +1,181 @@
+"""Local-only chain watcher: offline transport, no credentials or RPC."""
+import json
+from types import SimpleNamespace
+
+import pytest
+
+A = "5" + "A" * 47
+B = "5" + "B" * 47
+HOT = "5" + "H" * 47
+
+
+def evt(name, attrs, module="SubtensorModule", ex=2):
+    return SimpleNamespace(value=dict(module_id=module, event_id=name,
+                                      attributes=attrs, extrinsic_idx=ex))
+
+
+class Chain:
+    head = 50
+    requests = 0
+
+    def __init__(self):
+        self.blocks = []
+
+    def get_block_hash(self, n):
+        return "hash-" + str(n)
+
+    def get_chain_finalised_head(self):
+        return self.get_block_hash(self.head)
+
+    def get_block_number(self, block_hash):
+        return int(block_hash.split("-")[1])
+
+    def get_events(self, block_hash):
+        n = self.get_block_number(block_hash)
+        self.blocks.append(n)
+        if n == 50:
+            return [evt("Transfer", {"from": A, "to": B,
+                                     "amount": 1000000000}, "Balances"),
+                    evt("StakeRemoved", [A, HOT, 1500000000,
+                                         6000000000, 8, 0]),
+                    evt("StakeAdded", [B, HOT, 1500000000, 6000000000, 8, 0]),
+                    evt("StakeTransferred", [A, B, HOT, 8, 8, 1500000000]),
+                    evt("ExtrinsicSuccess", None, "System")]
+        if n == 51:
+            return [evt("StakeAdded",
+                        [A, HOT, 1000000000, 2000000000, 8, 0]),
+                    evt("StakeRemoved",
+                        [B, HOT, 1000000000, 3000000000, 9, 0], ex=4),
+                    evt("ExtrinsicFailed", {}, "System", ex=4)]
+        return []
+
+    def query(self, module, name, *, block_hash):
+        assert (module, name) == ("Timestamp", "Now")
+        return SimpleNamespace(value=1700000000000)
+
+    def close(self):
+        pass
+
+
+def test_watcher_reads_finalized_movements_resumes_and_does_not_replay():
+    from seo.tao_local_watch import poll
+    chain = Chain()
+    feed = poll(chain, {}, [B], max_blocks=2)
+    assert feed["last_scanned_block"] == 50 and feed["lag_blocks"] == 0
+    assert {e["kind"] for e in feed["events"]} == {
+        "stake_transfer", "tao_transfer"}
+    stake = next(e for e in feed["events"] if e["kind"] == "stake_transfer")
+    assert (stake["src"], stake["dst"], stake["alpha"]) == (A, B, 6)
+    assert stake["tao"] == 1.5 and stake["extrinsic"] == "50-0002"
+    assert stake["id"] == "finney:50:3"
+    chain.head = 53
+    feed = poll(chain, feed, [A, B], max_blocks=2)
+    assert feed["last_scanned_block"] == 52 and feed["lag_blocks"] == 1
+    assert feed["address_coverage_start"][A] == 51
+    assert feed["events"][0]["kind"] == "stake_increase"
+    assert len(feed["events"]) == 3
+    feed = poll(chain, feed, [A, B], max_blocks=2)
+    assert chain.blocks == [50, 51, 52, 53]
+    assert poll(chain, feed, [A, B], max_blocks=2)["events"] == feed["events"]
+    assert chain.blocks == [50, 51, 52, 53]
+
+
+def test_watcher_preserves_last_complete_block_on_network_failure():
+    from seo.tao_local_watch import poll
+    chain = Chain()
+    feed = poll(chain, {}, [A], max_blocks=2)
+    chain.head = 54
+    previous = chain.get_events
+
+    def fail(hash_):
+        if hash_ == "hash-52":
+            raise RuntimeError("private-endpoint-example")
+        return previous(hash_)
+
+    chain.get_events = fail
+    result = poll(chain, feed, [A], max_blocks=3)
+    assert result["last_scanned_block"] == 51
+    assert result["status"] == "read_error"
+    assert "private-endpoint-example" not in json.dumps(result)
+    chain.get_events = previous
+    result = poll(chain, result, [A], max_blocks=3)
+    assert result["last_scanned_block"] == 54
+    assert len(set(e["id"] for e in result["events"])) == len(result["events"])
+
+
+@pytest.mark.parametrize("ci", ["CI", "GITHUB_ACTIONS"])
+def test_watcher_refuses_ci_before_credentials(ci, tmp_path, monkeypatch):
+    from seo import tao_local_watch as watcher
+    monkeypatch.setenv(ci, "true")
+    monkeypatch.setattr(watcher, "_endpoint", lambda prompt: pytest.fail(
+        "CI must not read or prompt for credentials"))
+    assert watcher.main(["--once", "--address", A, "--out",
+                         str(tmp_path / "feed.json")]) == 2
+    assert not (tmp_path / "feed.json").exists()
+
+
+def test_one_approved_local_pass_writes_feed_and_refreshable_view(
+        tmp_path, monkeypatch, capsys):
+    from seo import tao_local_watch as watcher
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(watcher, "_endpoint", lambda prompt: "local-test")
+    monkeypatch.setattr(watcher, "_connect", lambda url, budget: Chain())
+    src = tmp_path / "report.json"
+    src.write_text(json.dumps(dict(following=[B], performance={
+        "wallets": [], "rankings": {}})))
+    path = tmp_path / "feed.json"
+    page = tmp_path / "viewer.html"
+    args = ["--report", str(src), "--out", str(path),
+            "--view", str(page), "--once"]
+    assert watcher.main(args) == 0
+    feed = json.loads(path.read_text())
+    assert len(feed["events"]) == 2 and feed["addresses"] == [B]
+    assert "finney:50:3" in page.read_text(encoding="utf8")
+    assert "local-test" not in path.read_text()
+    printed = capsys.readouterr().out
+    assert printed.count("Block 50") == 2
+    assert "6 alpha" in printed and "1 TAO" in printed
+    assert watcher.main(args) == 0
+    assert "Block 50" not in capsys.readouterr().out
+
+
+def test_initial_budget_stop_keeps_oldest_unscanned_height():
+    from seo.tao_local_watch import RequestBudget, poll
+    chain = Chain()
+    original = chain.get_events
+
+    def paused(block_hash):
+        raise RequestBudget
+
+    chain.get_events = paused
+    feed = poll(chain, {}, [A], max_blocks=1)
+    assert feed["status"] == "rpc_budget"
+    assert feed["last_scanned_block"] is None
+    chain.get_events = original
+    chain.head = 51
+    resumed = poll(chain, feed, [A], max_blocks=2)
+    assert [r["id"] for r in resumed["events"]] == [
+        "finney:51:0", "finney:50:3", "finney:50:0"]
+
+
+def test_public_screens_apply_only_to_report_following():
+    from seo.tao_local_watch import _addresses
+    report = {"following": [A, B], "performance": {"wallets": [
+        {"address": A, "screens": ["activity_above_limit"]}]}}
+    assert _addresses(report, []) == [B]
+    assert _addresses(report, [A]) == sorted([A, B])
+
+
+def test_same_wallet_hotkey_switch_is_one_movement_not_two_alerts():
+    from seo.tao_local_watch import block_events
+    other_hot = "5" + "Z" * 47
+    rows = [evt("StakeRemoved", [A, HOT, 1500000000, 6000000000, 8, 0]),
+            evt("StakeAdded", [A, other_hot, 1500000000, 6000000000, 8, 0]),
+            evt("StakeMoved", [A, HOT, 8, other_hot, 8, 1500000000])]
+    moves = block_events(777, rows, [A])
+    assert len(moves) == 1
+    e, = moves
+    assert e["event_name"] == "SubtensorModule.StakeMoved"
+    assert e["src"] == e["dst"] == A
+    assert e["alpha"] == e["dst_alpha"] == 6
