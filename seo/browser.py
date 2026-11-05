@@ -126,13 +126,26 @@ class Session:
         """Human-ish random pause between actions."""
         time.sleep(random.uniform(self.min_pause, self.max_pause) * scale)
 
-    def goto(self, url, check_google=True):
+    def goto(self, url, check_google=True, blocked=None):
+        """Load a page. `blocked(url, title, html)` may return a reason
+        string when the site served a bot wall; it raises ChallengeError
+        after one solve_captcha attempt, like the Google check does."""
         self.sb.goto(url)
         self.pages_loaded += 1
         self.pause(0.6)
         if check_google and "google." in url:
             self.dismiss_consent()
             self.ensure_not_challenged()
+        if blocked is not None:
+            reason = blocked(self.url(), self.title(), self.html())
+            if reason:
+                with suppress(Exception):
+                    self.sb.solve_captcha()
+                time.sleep(2.0)
+                reason = blocked(self.url(), self.title(), self.html())
+                if reason:
+                    self.screenshot("blocked")
+                    raise ChallengeError("%s at %s" % (reason, self.url()))
         return self
 
     def set_geolocation(self, lat, lng):

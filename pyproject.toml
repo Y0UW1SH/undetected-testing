@@ -15,6 +15,8 @@ dependencies = [
 
 [project.scripts]
 seo = "seo.cli:main"
+research = "seo.research_cli:main"
+tao = "seo.tao_cli:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "seo.__version__"}

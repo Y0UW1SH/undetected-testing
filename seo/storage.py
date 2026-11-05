@@ -20,6 +20,9 @@ TABLES = {
     "grid_cells": models.GridCell,
     "nap_records": models.NapRecord,
     "canary_runs": models.CanaryRun,
+    "listings": models.Listing,
+    "reddit_posts": models.RedditPost,
+    "subnet_stats": models.SubnetStat,
 }
 
 

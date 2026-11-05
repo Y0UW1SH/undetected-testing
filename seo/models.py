@@ -76,6 +76,64 @@ class Business(_Record):
 
 
 @dataclass
+class Listing(_Record):
+    """A product in Amazon or eBay search results."""
+    source: str              # amazon, ebay
+    query: str
+    position: int
+    title: str
+    url: Optional[str]
+    item_id: Optional[str] = None      # ASIN or eBay item number
+    price: Optional[float] = None
+    currency: Optional[str] = None
+    price_text: Optional[str] = None
+    rating: Optional[float] = None
+    reviews: Optional[int] = None
+    is_sponsored: bool = False
+    condition: Optional[str] = None    # eBay
+    shipping: Optional[str] = None     # eBay
+    prime: Optional[bool] = None       # Amazon
+    page: int = 1
+    fetched_at: str = field(default_factory=utcnow)
+
+
+@dataclass
+class RedditPost(_Record):
+    """A post in Reddit search results."""
+    query: str
+    position: int
+    post_id: Optional[str]
+    subreddit: Optional[str]
+    title: str
+    author: Optional[str] = None
+    score: Optional[int] = None
+    num_comments: Optional[int] = None
+    permalink: Optional[str] = None
+    url: Optional[str] = None
+    created_utc: Optional[int] = None
+    sort: str = "relevance"
+    fetched_at: str = field(default_factory=utcnow)
+
+
+@dataclass
+class SubnetStat(_Record):
+    """One Bittensor subnet row from taostats.io."""
+    netuid: int
+    name: Optional[str]
+    price_tao: Optional[float] = None       # alpha price in TAO
+    price_usd: Optional[float] = None
+    change_24h_pct: Optional[float] = None
+    change_7d_pct: Optional[float] = None
+    market_cap_tao: Optional[float] = None
+    emission_pct: Optional[float] = None    # share of TAO emission
+    volume_24h_tao: Optional[float] = None
+    tao_in_pool: Optional[float] = None     # liquidity / reserves
+    raw: Optional[str] = None               # the whole row as JSON text
+    source_url: Optional[str] = None
+    fetched_at: str = field(default_factory=utcnow)
+
+
+@dataclass
 class GridCell(_Record):
     """Rank of a target business at one grid point."""
     keyword: str

@@ -347,13 +347,38 @@ def cmd_export(args, store):
     return 0
 
 
+CAPTURE_KINDS = ("serp", "maps", "amazon", "ebay", "reddit", "taostats")
+
+
+def capture_url(kind, query):
+    """URL the capture command loads for a kind; lazy imports keep the
+    SEO CLI independent of the other tools' modules."""
+    if kind == "serp":
+        return google.build_url(query)
+    if kind == "maps":
+        return maps.build_maps_url(query)
+    if kind == "amazon":
+        from seo.sources import amazon
+        return amazon.build_url(query)
+    if kind == "ebay":
+        from seo.sources import ebay
+        return ebay.build_url(query)
+    if kind == "reddit":
+        from seo.sources import reddit
+        return reddit.build_url(query, as_json=False)
+    if kind == "taostats":
+        return "https://taostats.io/subnets" if not query.strip() else (
+            "https://taostats.io/subnets/%s" % query.strip())
+    raise ValueError(kind)
+
+
 def cmd_capture(args, store):
-    """Save the live HTML of a SERP or Maps page as a parser fixture."""
+    """Save the live HTML of a page as a parser fixture."""
     with _session(args) as s:
-        if args.kind == "serp":
-            s.goto(google.build_url(args.query))
-        else:
-            s.goto(maps.build_maps_url(args.query))
+        s.goto(capture_url(args.kind, args.query), check_google=False)
+        if args.kind in ("serp", "amazon", "ebay", "reddit", "taostats"):
+            s.scroll(times=4, amount=15)
+        if args.kind == "maps":
             maps.scroll_feed(s, max_results=10, max_rounds=3)
         html = s.html()
     with open(args.out, "w", encoding="utf-8") as fh:
@@ -537,8 +562,8 @@ def build_parser():
     sp.set_defaults(func=cmd_export)
 
     sp = sub.add_parser("capture", help="save live HTML as a fixture")
-    sp.add_argument("kind", choices=("serp", "maps"))
-    sp.add_argument("query")
+    sp.add_argument("kind", choices=CAPTURE_KINDS)
+    sp.add_argument("query", nargs="?", default="")
     sp.add_argument("--out", required=True)
     sp.add_argument("--mobile", action="store_true")
     sp.add_argument("--proxy")

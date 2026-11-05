@@ -69,6 +69,16 @@ class FakeBrowser:
 
 def google_router(url):
     """Fixture pages for the URLs the scrapers build."""
+    if "amazon." in url:
+        return ("Amazon.com : query", load_fixture("amazon_search.html"))
+    if "ebay." in url:
+        return ("query for sale | eBay", load_fixture("ebay_search.html"))
+    if "reddit.com" in url and ".json" in url:
+        return ("", load_fixture("reddit_search.json"))
+    if "reddit.com" in url:
+        return ("reddit", load_fixture("reddit_search.html"))
+    if "taostats.io" in url:
+        return ("Subnets | Taostats", load_fixture("taostats_subnets.html"))
     if "/maps/place/" in url:
         return ("Place", load_fixture("google_maps_place.html"))
     if "/maps/search/" in url:
