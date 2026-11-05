@@ -1,0 +1,6 @@
+{
+  "amazon": ["wireless mouse", "mechanical keyboard"],
+  "ebay": ["wireless mouse"],
+  "pages": 1,
+  "alert_threshold_pct": 10
+}

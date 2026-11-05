@@ -1,0 +1,89 @@
+name: Product research
+
+on:
+  schedule:
+    # Daily at 11:23 UTC (03:23 PST / 04:23 PDT); low volume on purpose.
+    - cron: "23 11 * * *"
+  workflow_dispatch:
+    inputs:
+      config:
+        description: "JSON config path"
+        default: "seo/config/research.json"
+      threshold:
+        description: "Alert when a price moves more than this percent"
+        default: "10"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: product-research
+  cancel-in-progress: false
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PY_COLORS: "1"
+      # Committed back to the repo so price alerts can compare runs.
+      RESEARCH_DB: data/research.sqlite
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          pip install -r requirements.txt
+          pip install .
+          seleniumbase install chromedriver
+
+      - name: Track Amazon and eBay queries
+        env:
+          SEO_PROXY: ${{ secrets.SEO_PROXY }}
+        run: |
+          CONFIG="${{ inputs.config || 'seo/config/research.json' }}"
+          THRESHOLD="${{ inputs.threshold || '10' }}"
+          if [ ! -f "$CONFIG" ]; then
+            echo "::notice::$CONFIG not found; copying the example"
+            cp seo/config/research.example.json "$CONFIG"
+          fi
+          PROXY_ARG=""
+          if [ -n "$SEO_PROXY" ]; then PROXY_ARG="--proxy $SEO_PROXY"; fi
+          research --db "$RESEARCH_DB" track --config "$CONFIG" \
+            --threshold "$THRESHOLD" --per-session 3 --on-challenge skip \
+            $PROXY_ARG
+
+      - name: Report and export
+        if: always()
+        run: |
+          research --db "$RESEARCH_DB" report --out data/research_report.html
+          research --db "$RESEARCH_DB" export --format csv
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: research-results
+          path: |
+            data/
+            downloaded_files/
+          if-no-files-found: ignore
+
+      - name: Commit database, alerts, CSV and report
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$RESEARCH_DB" data/research_*.csv data/research_*.json \
+            data/research_report.html 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No data changes to commit."
+          else
+            git commit -m "Update product research data [skip ci]"
+            git push
+          fi
