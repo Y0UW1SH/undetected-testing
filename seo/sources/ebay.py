@@ -17,7 +17,9 @@ ITEM_RE = re.compile(r"/itm/(\d{9,15})")
 RATING_RE = re.compile(r"([\d.]+)\s+out of\s+5")
 COUNT_RE = re.compile(r"([\d.,]+[KkMm]?)")
 BLOCK_TITLES = ("Pardon Our Interruption", "Security Measure",
-                "Access Denied")
+                "Access Denied", "Error Page")
+BLOCK_TEXT = ("Something went wrong on our end",
+              "Please verify yourself to continue")
 
 
 def build_url(query, page=1, site="www.ebay.com"):
@@ -34,6 +36,9 @@ def is_blocked(url, title, html):
         return "eBay bot check (%s)" % title
     if "/splashui/challenge" in (url or ""):
         return "eBay challenge page"
+    sample = (html or "")[:200000]
+    if any(t in sample for t in BLOCK_TEXT) and "srp-results" not in sample:
+        return "eBay error page (soft block)"
     return None
 
 

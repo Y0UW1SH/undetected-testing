@@ -189,3 +189,62 @@ def test_report_and_export(fake_env, monkeypatch, capsys):
     assert "Proprietary Trading Network" in html
     assert run(fake_env, "export", "--format", "json", "--dir", "out") == 0
     assert os.listdir("out") == ["subnet_stats.json"]
+
+
+def test_live_taostats_fixture(fixture):
+    """Captured from taostats.io/subnets via GitHub Actions: an AG Grid
+    with pinned-left name cells ("lium.io SN51") and col-id data cells."""
+    from seo.sources import taostats
+    rows = taostats.parse_subnets(fixture("live_taostats_subnets.html"))
+    assert len(rows) == 25                       # one virtualised page
+    assert len({r.netuid for r in rows}) == 25
+    by = {r.netuid: r for r in rows}
+    sn51 = by[51]
+    assert sn51.name == "lium.io"
+    assert sn51.price_tao == 0.118788
+    assert sn51.change_24h_pct == 2.71 and sn51.change_7d_pct == -4.88
+    assert sn51.market_cap_tao == 603050
+    assert sn51.emission_pct == 16.13
+    assert sn51.volume_24h_tao == 6550
+    assert sn51.tao_in_pool == 376820
+    assert '"1H"' in sn51.raw and "0.12%" in sn51.raw
+    assert by[64].name == "Chutes" and by[4].name == "Targon"
+    assert all(r.price_tao is not None for r in rows)
+
+
+def test_fetch_subnets_pages_through_the_grid(fixture):
+    """Two fake pages: the Next Page button is 'clicked' once, then
+    reported 'disabled'; rows from both pages are merged by netuid."""
+    from seo.browser import Session
+    from seo.sources import taostats
+    from tests.fakes import FakeBrowser
+
+    page1 = fixture("live_taostats_subnets.html")
+    page2 = page1.replace('row-id="row-51"', 'row-id="row-999"').replace(
+        "lium.io SN51", "Testnet SN999")
+
+    class PagingBrowser(FakeBrowser):
+        def __init__(self):
+            super().__init__()
+            self.clicks = 0
+
+        def get_page_source(self):
+            return page2 if self.clicks else page1
+
+        def evaluate(self, js):
+            if "Next" in js:
+                if self.clicks == 0:
+                    self.clicks += 1
+                    return "clicked"
+                return "disabled"
+            return 0
+
+    browser = PagingBrowser()
+    with Session(browser=browser, min_pause=0, max_pause=0) as s:
+        s.pause = lambda scale=1.0: None
+        rows = taostats.fetch_subnets(s)
+    assert browser.clicks == 1
+    netuids = [r.netuid for r in rows]
+    assert 51 in netuids and 999 in netuids
+    assert len(rows) == 26                 # 25 from page 1 + 1 new row
+    assert netuids == sorted(netuids)

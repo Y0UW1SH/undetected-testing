@@ -44,6 +44,13 @@ seo doctor --browser
 
 ### Known limits
 
+* From GitHub Actions runners, Amazon and taostats.io load normally
+  (Amazon: 16 results parsed from a live capture), but eBay answers with
+  its "Something went wrong on our end" error page and Reddit with
+  "You've been blocked by network security". Both are detected and
+  reported as challenges; run those two from a home connection or
+  through a proxy (`RESEARCH_PROXY` / `--proxy`).
+
 * The web-search SERP parser has only been tested against hand-written
   HTML; Google challenged every datacenter IP used for capture. Capture
   one from a home connection with
@@ -74,10 +81,12 @@ seo doctor --browser
   compares with the previous run and warns on moves beyond a threshold;
   `tao report` renders the table and alerts. Own database
   (`data/tao.sqlite`) and 4-hourly workflow (`tao.yml`).
-* The taostats parser is structural (header-name based) and was
-  written before a real page capture; the `seo capture taostats`
-  command and the SEO workflow's `capture_extra` input exist to refresh
-  it against the live page.
+* The subnet list is an AG Grid (no `<table>`): the parser reads the
+  `col-id` cells and joins the pinned name column with the data columns
+  by row index; validated against a live capture of taostats.io/subnets
+  (25 virtualised rows per view, scrolled and merged by netuid). The
+  `seo capture taostats` command and the SEO workflow's `capture_extra`
+  input refresh the fixture when the site changes.
 
 ### Reddit (under `seo`)
 

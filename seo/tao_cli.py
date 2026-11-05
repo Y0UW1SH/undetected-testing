@@ -326,6 +326,11 @@ def build_parser():
     sub = p.add_subparsers(dest="command", required=True)
 
     sp = sub.add_parser("subnets", help="fetch the subnet table")
+    sp.add_argument("--headless", action="store_true",
+                    default=argparse.SUPPRESS,
+                    help="same as the global --headless")
+    sp.add_argument("--proxy", default=argparse.SUPPRESS,
+                    help="same as the global --proxy")
     sp.add_argument("--force", action="store_true")
     sp.set_defaults(func=cmd_subnets)
 
@@ -335,6 +340,11 @@ def build_parser():
     sp.set_defaults(func=cmd_subnet)
 
     sp = sub.add_parser("watch", help="fetch and warn about big moves")
+    sp.add_argument("--headless", action="store_true",
+                    default=argparse.SUPPRESS,
+                    help="same as the global --headless")
+    sp.add_argument("--proxy", default=argparse.SUPPRESS,
+                    help="same as the global --proxy")
     sp.add_argument("--threshold", type=float,
                     help="percent (default 10 or the config value)")
     sp.add_argument("--netuids", help="e.g. 1,8,19 (default: config/all)")

@@ -61,3 +61,16 @@ run saves nothing, capture the live page and compare it with
 seo capture taostats --out data/live_taostats.html
 # or dispatch the SEO tracking workflow with capture_extra "taostats:"
 ```
+
+
+## Parser status
+
+The subnet list on taostats.io is an AG Grid rather than an HTML table.
+The parser reads the grid's `col-id` cells (`price`,
+`price_change_one_day`, `market_cap`, `emission_total_pct`, `liquidity`,
+...) and joins the pinned name column ("lium.io SN51") with the data
+columns by row index. It was validated against a live capture from a
+GitHub Actions runner; the grid shows about 25 rows at a time, so
+`tao subnets` scrolls the grid viewport and merges rows by netuid until
+no new ones appear. Refresh the fixture with the SEO workflow's
+`capture_extra` input (`taostats:`) or `seo capture taostats --out ...`.

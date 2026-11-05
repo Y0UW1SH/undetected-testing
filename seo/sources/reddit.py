@@ -31,9 +31,9 @@ def build_url(query, subreddit=None, sort="relevance", time="all",
 
 def is_blocked(url, title, html):
     title = title or ""
-    sample = (html or "")[:20000]
+    sample = html or ""           # the notice sits after a large <head>
     if "blocked by network security" in sample or "Too Many Requests" in title:
-        return "Reddit rate limit / network block"
+        return "Reddit network-security block (log in or use a home IP)"
     if '"error": 429' in sample or '"error":429' in sample:
         return "Reddit 429"
     return None

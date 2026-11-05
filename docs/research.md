@@ -81,3 +81,13 @@ threshold from the Actions tab. Set a `SEO_PROXY` secret
   exit code 3 instead of silently saving an empty result.
 * Prices depend on the site's idea of your location; use `--proxy` from
   the market you care about.
+
+
+## Where it runs
+
+Amazon loads normally from GitHub Actions runners (a live capture parsed
+16 results with prices, ratings and review counts). eBay answers Actions
+runners with its "Something went wrong on our end" error page, which
+`research` reports as a challenge (exit code 3 / `challenged_sessions`
+in `track`). Run eBay from a home connection or set the
+`RESEARCH_PROXY` secret (`user:pass@host:port`) for the workflow.

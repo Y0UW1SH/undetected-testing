@@ -233,3 +233,20 @@ def test_github_actions_warning_lines(fake_env, monkeypatch, capsys):
         "change_pct": 100.0}])
     out = capsys.readouterr().out
     assert "::warning::ebay 'q': up 1 1.00 -> 2.00 (+100.0%) T" in out
+
+
+def test_live_amazon_fixture(fixture):
+    """Captured from amazon.com via GitHub Actions (result blocks only)."""
+    from seo.sources import amazon
+    items = amazon.parse(fixture("live_amazon_search.html"), "wireless mouse")
+    assert len(items) == 16
+    first = items[0]
+    assert first.item_id == "B004YAVF8I"
+    assert first.title.startswith("Logitech M185")
+    assert (first.price, first.currency) == (12.99, "USD")
+    assert (first.rating, first.reviews) == (4.4, 45671)
+    assert first.url == "https://www.amazon.com/dp/B004YAVF8I"
+    assert all(i.price is not None for i in items)
+    assert all(i.rating is not None for i in items)
+    assert [i.position for i in items] == list(range(1, 17))
+    assert amazon.is_blocked("", "Amazon.com : wireless mouse", "") is None

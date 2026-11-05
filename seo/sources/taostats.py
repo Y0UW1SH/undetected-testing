@@ -5,6 +5,7 @@ The parser is structural: it looks for the data table (a <table>, or a
 mentions a price, maps columns by fuzzy header names, and keeps the
 whole row as JSON so nothing is lost when the site adds columns."""
 import json
+import time
 import re
 
 from bs4 import BeautifulSoup
@@ -146,9 +147,92 @@ def _netuid_and_name(cells, mapping):
     return netuid, name
 
 
+# taostats.io renders the subnet list with AG Grid: no <table>, cells
+# carry col-id attributes, each row is split between a pinned-left
+# container (rank, "name SN<netuid>") and the centre container (data),
+# joined by row-index, and the row-id is "row-<netuid>".
+AG_FIELDS = {
+    "price_tao": "price",
+    "price_usd": "price_usd",
+    "change_24h_pct": "price_change_one_day",
+    "change_7d_pct": "price_change_one_week",
+    "market_cap_tao": "market_cap",
+    "emission_pct": "emission_total_pct",
+    "volume_24h_tao": "tao_volume_one_day",
+    "tao_in_pool": "liquidity",
+}
+AG_ROW_ID_RE = re.compile(r"row-(\d+)$")
+AG_NAME_RE = re.compile(r"^(.*?)\s*SN\s*(\d{1,3})\s*$")
+
+
+def _ag_grid(soup):
+    """(headers, rows) from the AG Grid that has a price column, or
+    (None, []) when the page has no such grid."""
+    grid = None
+    for root in soup.select(".ag-root-wrapper, .ag-root"):
+        if root.select_one('[role="columnheader"][col-id="price"]'):
+            grid = root
+            break
+    if grid is None:
+        if soup.select_one('[role="columnheader"][col-id="price"]'):
+            grid = soup
+        else:
+            return None, []
+    headers = {h.get("col-id"): _text(h)
+               for h in grid.select('[role="columnheader"][col-id]')}
+    rows = {}
+    for row in grid.select('[role="row"][row-index]'):
+        if row.find_parent(class_=re.compile(r"ag-(floating|header)")):
+            continue                      # totals row / header row
+        rec = rows.setdefault(row.get("row-index"),
+                              {"_row_id": row.get("row-id")})
+        for cell in row.select('[role="gridcell"][col-id]'):
+            rec[cell["col-id"]] = _text(cell)
+    return headers, list(rows.values())
+
+
+def _ag_value(text):
+    if text is None:
+        return None
+    cleaned = text.replace("Bittensor", "").replace("τ", "").strip()
+    if cleaned in ("", "-", "—"):
+        return None
+    value = parse_number(cleaned)
+    return round(value, 6) if value is not None else None   # 130.98K*1e3
+
+
+def _parse_ag_grid(soup, source_url):
+    headers, rows = _ag_grid(soup)
+    results = {}
+    for rec in rows:
+        netuid = name = None
+        m = AG_ROW_ID_RE.search(rec.get("_row_id") or "")
+        if m:
+            netuid = int(m.group(1))
+        label = rec.get("netuid") or ""
+        m = AG_NAME_RE.match(label)
+        if m:
+            name = m.group(1).strip() or None
+            netuid = netuid if netuid is not None else int(m.group(2))
+        elif label:
+            name = label.strip()
+        if netuid is None or netuid in results:
+            continue
+        values = {field: _ag_value(rec.get(col))
+                  for field, col in AG_FIELDS.items()}
+        raw = {headers.get(k, k): v for k, v in rec.items()
+               if k != "_row_id"}
+        results[netuid] = models.SubnetStat(
+            netuid=netuid, name=name, source_url=source_url,
+            raw=json.dumps(raw, ensure_ascii=False), **values)
+    return results
+
+
 def parse_subnets(html, source_url=SUBNETS_URL):
     soup = BeautifulSoup(html, "html.parser")
-    results = {}
+    results = _parse_ag_grid(soup, source_url)
+    if results:
+        return [results[k] for k in sorted(results)]
     for headers, rows in _tables(soup):
         if not any(re.search(r"price", h or "", re.I) for h in headers):
             continue
@@ -171,18 +255,55 @@ def parse_subnets(html, source_url=SUBNETS_URL):
     return [results[k] for k in sorted(results)]
 
 
-def fetch_subnets(session, max_rounds=15):
-    """Load the subnets page and scroll until no new rows appear; rows
-    are merged by netuid because a virtualised list drops the ones
-    scrolled out of view."""
+NEXT_PAGE_JS = (
+    # The site renders its own pager (Previous, 1..N, Next) beside each
+    # grid; AG Grid's built-in paging panel is present but inert. Find
+    # the grid that has the price column, walk up to the container that
+    # holds a "Next" button, and click it unless it is disabled.
+    "(function(){var grids=Array.from(document.querySelectorAll("
+    "'.ag-root-wrapper'));var grid=grids.find(function(g){return "
+    "g.querySelector('[role=columnheader][col-id=\"price\"]');});"
+    "if(!grid){return 'none';}var node=grid,btn=null;"
+    "for(var i=0;i<8&&node;i++){node=node.parentElement;if(!node){break;}"
+    "btn=Array.from(node.querySelectorAll('button')).find(function(b){"
+    "return (b.innerText||'').trim()==='Next';});if(btn){break;}}"
+    "if(!btn){var ag=document.querySelector("
+    "'.ag-paging-panel [aria-label=\"Next Page\"]');if(!ag){return 'none';}"
+    "if(ag.classList.contains('ag-disabled')){return 'disabled';}"
+    "ag.click();return 'clicked';}"
+    "if(btn.disabled||btn.getAttribute('aria-disabled')==='true'){"
+    "return 'disabled';}btn.click();return 'clicked';})()"
+)
+
+
+def fetch_subnets(session, max_rounds=40):
+    """Load the subnets page and collect every row. The AG Grid is
+    paginated (25 rows per page, aria-rowcount gives the total), so the
+    "Next Page" button is clicked until it is disabled and the pages are
+    merged by netuid. Window scrolling is the fallback for a plain
+    table that loads more rows as you scroll."""
     session.goto(SUBNETS_URL, check_google=False, blocked=is_blocked)
-    session.scroll(times=8, amount=20)
+    session.scroll(times=3, amount=15)
     merged = {s.netuid: s for s in parse_subnets(session.html())}
+    stale = 0
     for _ in range(max_rounds):
+        try:
+            state = session.sb.evaluate(NEXT_PAGE_JS)
+        except Exception:
+            state = "none"
+        if state == "clicked":
+            time.sleep(1.0)
+        elif state == "disabled":
+            break
+        else:
+            session.scroll(times=4, amount=20)
         before = len(merged)
-        session.scroll(times=4, amount=20)
         for stat in parse_subnets(session.html()):
             merged.setdefault(stat.netuid, stat)
         if len(merged) == before:
-            break
+            stale += 1
+            if stale >= 2:
+                break
+        else:
+            stale = 0
     return [merged[k] for k in sorted(merged)]

@@ -65,14 +65,18 @@ def parse(html, query, page=1, domain="amazon.com"):
             if m:
                 rating = float(m.group(1))
         reviews = None
-        count_node = div.select_one(
-            'a[aria-label*="ratings"], a[aria-label*="rating"], '
-            "span.s-underline-text")
-        if count_node is not None:
-            m = COUNT_RE.match(count_node.get("aria-label")
-                               or count_node.get_text())
+        # Priority order matters: the "4.4 out of 5 stars, rating details"
+        # link also matches *rating*, so look for the count link first.
+        for selector in ('a[aria-label$=" ratings"]',
+                         'a[aria-label$=" rating"]', "span.s-underline-text"):
+            count_node = div.select_one(selector)
+            if count_node is None:
+                continue
+            label = count_node.get("aria-label") or count_node.get_text()
+            m = COUNT_RE.match(label.strip().lstrip("("))
             if m:
                 reviews = parse_count(m.group(1))
+                break
         text = div.get_text(" ", strip=True)
         sponsored = ("/sspa/" in href or "Sponsored" in text
                      or div.select_one(
