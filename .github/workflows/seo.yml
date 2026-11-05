@@ -13,6 +13,9 @@ on:
         description: "Only measure the Google challenge rate"
         type: boolean
         default: false
+      capture_serp:
+        description: "Also save the live web-search page for this query as data/live_serp.html (parser fixture)"
+        default: ""
 
 permissions:
   contents: write
@@ -47,6 +50,25 @@ jobs:
         run: |
           python -m seo --db "$SEO_DB" canary --queries 5 --per-session 1 \
             --fail-above 80 || echo "::warning::High challenge rate"
+
+      - name: Capture a live SERP as a parser fixture
+        if: ${{ inputs.capture_serp != '' }}
+        env:
+          CAPTURE_QUERY: ${{ inputs.capture_serp }}
+        run: |
+          python -m seo --db "$SEO_DB" capture serp "$CAPTURE_QUERY" \
+            --out data/live_serp.html
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, ".")
+          from seo.serp.google import parse_serp
+          html = open("data/live_serp.html", encoding="utf-8").read()
+          parsed = parse_serp(html, "capture")
+          for key, items in parsed.items():
+              print("%-12s %d" % (key, len(items)))
+              for r in items[:5]:
+                  print("   ", r.position, r.result_type, r.domain, (r.title or "")[:70])
+          PY
 
       - name: Run tracked keywords
         if: ${{ inputs.canary_only != true }}
