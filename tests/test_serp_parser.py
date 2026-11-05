@@ -93,6 +93,64 @@ def test_local_pack_phone_is_not_a_review_count():
     assert pack[0].category == "Plumber"
 
 
+def test_live_serp_fixture(fixture):
+    """Captured from a real Google results page via GitHub Actions. Links
+    are opaque /goto?url= redirects; the domain comes from <cite>."""
+    parsed = google.parse_serp(fixture("live_google_serp.html"),
+                               "emergency plumber austin", "Austin, TX")
+    organic = parsed["organic"]
+    assert len(organic) >= 8
+    assert [r.position for r in organic] == list(range(1, len(organic) + 1))
+    first = organic[0]
+    assert first.title.startswith("Austin Plumber")
+    assert first.domain == "rotorooter.com"
+    assert first.url == "https://www.rotorooter.com"
+    assert first.source == "Roto-Rooter"
+    assert "emergency plumbing" in first.snippet
+    assert organic[1].domain == "abacusplumbing.com"
+    reddit = [r for r in organic if "r/Austin" in (r.title or "")][0]
+    assert reddit.domain is None                 # cite had no URL
+    assert reddit.source == "Reddit"
+    assert reddit.url.startswith("https://www.google.com/goto?url=")
+    assert all((r.domain or "").find("google") == -1 for r in organic)
+    assert len({r.title for r in organic}) == len(organic)   # no dupes
+    paa = parsed["paa"]
+    assert len(paa) == 4
+    assert paa[0].title == "How much should I pay for an emergency plumber?"
+    pack = parsed["local_pack"]
+    assert [e.name for e in pack][:2] == ["Austin's Greatest Plumbing",
+                                          "Reliant Plumbing - Austin"]
+    assert len(pack) == 3
+    assert (pack[0].rating, pack[0].reviews) == (5.0, 346)
+    assert pack[0].category == "Plumber"
+    assert pack[0].phone == "(512) 377-9919"
+    assert pack[1].reviews == 1700                # "1.7K user reviews"
+    assert pack[2].reviews == 2900
+    assert all(e.is_ad is False for e in pack)
+    assert parsed["ads"] == [] and parsed["featured"] == []
+
+
+def test_parse_count():
+    from seo.textutil import parse_count
+    assert parse_count("346") == 346
+    assert parse_count("1,234") == 1234
+    assert parse_count("1.7K") == 1700
+    assert parse_count("2M") == 2000000
+    assert parse_count("abc") is None
+
+
+def test_result_link_variants():
+    assert google._result_link("/goto?url=abc") == (
+        "https://www.google.com/goto?url=abc", True)
+    assert google._result_link("/url?q=https://x.example/p&sa=U") == (
+        "https://x.example/p", False)
+    assert google._result_link("https://x.example/") == (
+        "https://x.example/", False)
+    assert google._result_link("https://www.google.com/maps") == (
+        None, False)
+    assert google._result_link("#") == (None, False)
+
+
 def test_empty_page_parses_to_nothing():
     parsed = google.parse_serp("<html><body></body></html>", "q")
     assert all(not v for v in parsed.values())

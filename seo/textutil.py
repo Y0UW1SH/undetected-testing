@@ -2,6 +2,18 @@
 import re
 
 REVIEWS_TOKEN_RE = re.compile(r"^\(([\d,]+)\)$")
+_SUFFIX = {"k": 1_000, "m": 1_000_000}
+
+
+def parse_count(text):
+    """'346' -> 346, '1,234' -> 1234, '1.7K' -> 1700, '2M' -> 2000000."""
+    if text is None:
+        return None
+    m = re.match(r"^\s*([\d][\d,]*(?:\.\d+)?)\s*([KkMm])?\s*$", text)
+    if not m:
+        return None
+    number = float(m.group(1).replace(",", ""))
+    return int(round(number * _SUFFIX.get((m.group(2) or "").lower(), 1)))
 
 
 def paren_count(node):

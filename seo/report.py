@@ -61,8 +61,9 @@ def _serp_section(store):
             label = {"ad": "Ad", "featured_snippet": "Featured",
                      "organic": str(r["position"]), "paa": "PAA"}.get(kind,
                                                                       kind)
-            link = ("<a href='%s'>%s</a>" % (_esc(r["url"]), _esc(r["domain"]))
-                    if r["url"] else "")
+            label_text = r["domain"] or r.get("source") or r["url"]
+            link = ("<a href='%s'>%s</a>" % (_esc(r["url"]), _esc(label_text))
+                    if r["url"] else _esc(label_text))
             body.append([
                 "<span class='%s'>%s</span>" % ("ad" if kind == "ad" else "",
                                                 label),

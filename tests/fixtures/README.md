@@ -8,14 +8,16 @@ headless browser (scripts, styles and image sources stripped):
   it has no street address)
 * `live_google_sorry.html`: the "unusual traffic" challenge page that
   Google web search served to the same headless browser
+* `live_google_serp.html`: a real web-search results page for "emergency
+  plumber austin", captured by the `seo.yml` workflow's `capture_serp`
+  input from a GitHub Actions runner (main column only). Note the
+  `/goto?url=` redirect links and the label-based local pack.
 
 The other files are **hand-written** to mirror the structural hooks the
 parsers rely on (`a[href] h3`, `[data-q]`, `[data-cid]`, `#tads`,
-`div[role="feed"]`, `data-item-id`, ...). No live web-search SERP has
-been captured yet because Google challenged the datacenter IP used for
-capture; the first successful `python -m seo capture serp ...` from a
-clean IP should be added here. Refresh fixtures whenever Google changes
-markup:
+`div[role="feed"]`, `data-item-id`, ...). Refresh fixtures whenever
+Google changes markup, locally or by dispatching the SEO tracking
+workflow with a `capture_serp` query and downloading the artifact:
 
     python -m seo capture serp "emergency plumber austin" \
         --out tests/fixtures/google_serp_desktop.html

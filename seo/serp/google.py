@@ -16,13 +16,20 @@ from bs4 import BeautifulSoup
 
 from seo import models
 from seo.geo import uule
-from seo.textutil import paren_count
+from seo.local.maps import _card_details, _tokens
+from seo.textutil import paren_count, parse_count
 
 SEARCH_URL = "https://www.google.com/search"
+GOOGLE_BASE = "https://www.google.com"
 GOOGLE_HOSTS = ("google.", "googleusercontent.", "gstatic.", "youtube.")
+# Google now links results through opaque redirects such as
+# /goto?url=<token>; the destination is only visible in the <cite> text.
+REDIRECT_PREFIXES = ("/goto?", "/url?", "/aclk?", "/interstitial?")
 RATING_RE = re.compile(
-    r"Rated\s+([\d.]+)\s+out of\s+5(?:,)?\s*(?:([\d,]+)\s+reviews?)?", re.I
+    r"Rated\s+([\d.]+)\s+out of\s+5,?\s*"
+    r"(?:([\d.,]+\s*[KkMm]?)\s+(?:user\s+)?reviews?)?", re.I
 )
+CITE_URL_RE = re.compile(r"https?://[^\s\u203a]+")
 SHARED_IDS = ("rso", "search", "center_col", "main", "rcnt")
 
 
@@ -64,6 +71,49 @@ def _clean_href(href):
 def _is_google_host(url):
     host = domain_of(url) or ""
     return any(host.startswith(g) or ("." + g) in host for g in GOOGLE_HOSTS)
+
+
+def _result_link(href):
+    """(url, is_redirect) for a result anchor, or (None, False) when the
+    anchor is navigation rather than a result. A Google redirect is made
+    absolute so it still works when clicked."""
+    if not href:
+        return None, False
+    if href.startswith("/url?"):
+        qs = urllib.parse.parse_qs(urllib.parse.urlsplit(href).query)
+        real = (qs.get("q") or qs.get("url") or [None])[0]
+        if real and real.startswith(("http://", "https://")):
+            return real, False
+        return GOOGLE_BASE + href, True
+    if href.startswith(REDIRECT_PREFIXES):
+        return GOOGLE_BASE + href, True
+    if href.startswith(("http://", "https://")):
+        if _is_google_host(href):
+            return None, False
+        return href, False
+    return None, False
+
+
+def _cite_url(block):
+    """The visible URL Google prints under a result, if any."""
+    for cite in block.select("cite"):
+        m = CITE_URL_RE.search(cite.get_text(" ", strip=True))
+        if m:
+            return m.group(0).rstrip("/.,")
+    return None
+
+
+def _source_name(anchor, h3):
+    """Site name Google shows next to the favicon ("Roto-Rooter",
+    "Reddit · r/Austin"); the first anchor text line that is neither
+    the title nor a URL fragment."""
+    title = h3.get_text(strip=True)
+    for line in anchor.get_text("\n", strip=True).split("\n"):
+        line = line.strip()
+        if not line or line == title or line.startswith(("http", "\u203a")):
+            continue
+        return line.split("\u00b7")[0].strip() or None
+    return None
 
 
 def _text(node, limit=400):
@@ -116,17 +166,21 @@ def parse_serp(html, query, location="", device="desktop", page=1):
     ad_urls = set()
     for container in soup.select("#tads, #tadsb, #bottomads, [data-text-ad]"):
         for a in container.select("a[href]"):
-            url = _clean_href(a.get("href"))
-            if not url or _is_google_host(url) or url in ad_urls:
-                continue
+            url, redirect = _result_link(a.get("href"))
             title = a.select_one('[role="heading"], h3, span')
-            if title is None:
+            if not url or title is None:
+                continue
+            cite = _cite_url(_result_block(a))
+            if redirect and cite:
+                url = cite
+            if url in ad_urls:
                 continue
             ad_urls.add(url)
             out["ads"].append(models.SerpResult(
                 position=len(out["ads"]) + 1, result_type="ad",
-                url=url, domain=domain_of(url), title=_text(title),
-                snippet=None, page=page, **common))
+                url=url, domain=domain_of(url) if not (redirect and not cite)
+                else None, title=_text(title), snippet=None, page=page,
+                **common))
 
     # ---- featured snippet ----------------------------------------------
     fs = soup.select_one(
@@ -158,46 +212,19 @@ def parse_serp(html, query, location="", device="desktop", page=1):
                 domain=None, title=question, page=page, **common))
 
     # ---- local pack ----------------------------------------------------
-    for card in soup.select("[data-cid]"):
-        heading = card.select_one('[role="heading"], .dbg0pd, span.OSrXXb')
-        name = _text(heading) if heading else None
-        if not name:
-            continue
-        rating = reviews = None
-        label_node = card.select_one("[aria-label*='out of 5']")
-        if label_node is not None:
-            m = RATING_RE.search(label_node.get("aria-label", ""))
-            if m:
-                rating = float(m.group(1))
-                if m.group(2):
-                    reviews = int(m.group(2).replace(",", ""))
-        if reviews is None:
-            reviews = paren_count(card)
-        lines = [ln.strip() for ln in card.get_text("\n").split("\n")
-                 if ln.strip()]
-        category = address = None
-        for ln in lines:
-            if "·" in ln:
-                left, right = [p.strip() for p in ln.split("·", 1)]
-                if not category and not any(ch.isdigit() for ch in left):
-                    category = left
-                    address = right
-                    break
-        card_text = card.get_text(" ", strip=True)
-        is_ad = card.select_one("[data-text-ad]") is not None or (
-            " Sponsored" in card_text or card_text.startswith("Ad "))
-        out["local_pack"].append(models.LocalPackEntry(
-            position=len(out["local_pack"]) + 1, name=name, rating=rating,
-            reviews=reviews, category=category, address=address,
-            is_ad=is_ad, **common))
+    cards = soup.select("[data-cid]") or _label_cards(soup)
+    for card in cards:
+        entry = _local_entry(card, len(out["local_pack"]) + 1, common)
+        if entry is not None:
+            out["local_pack"].append(entry)
 
     # ---- organic -------------------------------------------------------
     root = soup.select_one("#rso") or soup.select_one("#search") or soup
     seen = {r.url for r in out["featured"] if r.url}
     for h3 in root.select("a[href] h3"):
         a = h3.find_parent("a")
-        url = _clean_href(a.get("href"))
-        if not url or url in seen or url in ad_urls or _is_google_host(url):
+        url, redirect = _result_link(a.get("href"))
+        if not url or url in ad_urls:
             continue
         if a.find_parent(attrs={"data-q": True}) is not None:
             continue  # PAA expansion content
@@ -205,12 +232,73 @@ def parse_serp(html, query, location="", device="desktop", page=1):
             continue  # local pack
         if a.find_parent(id=re.compile("^(tads|tadsb|bottomads)$")):
             continue
-        seen.add(url)
+        block = _result_block(a)
+        cite = _cite_url(block)
+        if redirect and cite:
+            url, domain = cite, domain_of(cite)
+        elif redirect:
+            domain = None
+        else:
+            domain = domain_of(url)
+        key = url if not redirect or cite else _text(h3)
+        if key in seen:
+            continue
+        seen.add(key)
         out["organic"].append(models.SerpResult(
             position=len(out["organic"]) + 1, result_type="organic",
-            url=url, domain=domain_of(url), title=_text(h3),
-            snippet=_snippet_for(a), page=page, **common))
+            url=url, domain=domain, title=_text(h3),
+            snippet=_snippet_for(a), source=_source_name(a, h3),
+            page=page, **common))
     return out
+
+
+def _label_cards(soup):
+    """Local-pack cards located from their "Rated X out of 5" labels when
+    Google omits data-cid: the smallest ancestor of a label that holds a
+    heading. Each card carries two labels (full and short), so the climb
+    gives up when it would swallow a neighbouring card."""
+    cards, seen = [], set()
+    for label in soup.select("[aria-label^='Rated ']"):
+        node = label
+        card = None
+        for _ in range(10):
+            node = node.parent
+            if node is None or node.name in ("body", "html"):
+                break
+            if len(node.select("[aria-label^='Rated ']")) > 2:
+                break
+            if node.select_one('[role="heading"]') is not None:
+                card = node
+                break
+        if card is not None and id(card) not in seen:
+            seen.add(id(card))
+            cards.append(card)
+    return cards
+
+
+def _local_entry(card, position, common):
+    heading = card.select_one('[role="heading"], .dbg0pd, span.OSrXXb')
+    name = _text(heading) if heading else None
+    if not name:
+        return None
+    rating = reviews = None
+    for node in card.select("[aria-label*='out of 5']"):
+        m = RATING_RE.search(node.get("aria-label", ""))
+        if m:
+            rating = float(m.group(1))
+            if m.group(2):
+                reviews = parse_count(m.group(2))
+                break
+    if reviews is None:
+        reviews = paren_count(card)
+    tokens = _tokens(card)
+    category, address, status, phone = _card_details(card, tokens)
+    is_ad = card.select_one("[data-text-ad]") is not None or (
+        "Sponsored" in tokens)
+    return models.LocalPackEntry(
+        position=position, name=name, rating=rating, reviews=reviews,
+        category=category, address=address, phone=phone, status=status,
+        is_ad=is_ad, **common)
 
 
 def fetch_serp(session, query, canonical_location=None, device="desktop",

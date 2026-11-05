@@ -13,6 +13,7 @@ MAPS_SEARCH_NOGEO = "https://www.google.com/maps/search/{q}"
 STARS_RE = re.compile(r"([\d.]+)\s+stars?\s*(?:([\d,]+)\s+reviews?)?", re.I)
 PHONE_RE = re.compile(r"^\+?[\d(][\d\s().-]{6,}\d$")
 REVIEWS_TOKEN_RE = re.compile(r"^\([\d,]+\)$")
+REVIEWS_ANCHOR_RE = re.compile(r"\([\d,]+\)\s*$")   # "(228)" or "4.8 (228)"
 RATING_TOKEN_RE = re.compile(r"^\d(\.\d)?$")
 TIME_RE = re.compile(r"^\d{1,2}(:\d{2})?\s?[AP]M\b", re.I)
 STATUS_WORDS = ("open", "closed", "closes", "opens", "temporarily",
@@ -110,12 +111,14 @@ def _card_details(card, tokens=None):
     tokens = tokens if tokens is not None else _tokens(card)
     category = address = status = phone = None
     anchor = next((i for i, t in enumerate(tokens)
-                   if REVIEWS_TOKEN_RE.match(t)), None)
+                   if REVIEWS_ANCHOR_RE.search(t)), None)
     if anchor is None:
         anchor = next((i for i, t in enumerate(tokens)
                        if RATING_TOKEN_RE.match(t)
                        or t.lower() == "no reviews"), 0)
     i = anchor + 1
+    if i < len(tokens) and tokens[i] == SEP:
+        i += 1          # SERP local-pack cards write "(346) · Plumber"
     if i < len(tokens) and tokens[i] != SEP \
             and not any(c.isdigit() for c in tokens[i]) \
             and not _looks_like_status(tokens[i]) \

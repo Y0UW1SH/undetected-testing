@@ -112,7 +112,7 @@ def _report_serp(parsed, page):
         print("  [local %d] %s  %s (%s)" % (e.position, e.name, e.rating,
                                             e.reviews))
     for r in parsed["organic"]:
-        print("  %2d. %s  %s" % (r.position, r.domain, r.title))
+        print("  %2d. %s  %s" % (r.position, r.domain or r.source, r.title))
     for r in parsed["paa"]:
         print("  [paa] %s" % r.title)
 

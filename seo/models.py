@@ -29,6 +29,7 @@ class SerpResult(_Record):
     domain: Optional[str]
     title: Optional[str]
     snippet: Optional[str] = None
+    source: Optional[str] = None   # site name Google shows, e.g. "Reddit"
     page: int = 1
     fetched_at: str = field(default_factory=utcnow)
 
@@ -45,6 +46,8 @@ class LocalPackEntry(_Record):
     reviews: Optional[int] = None
     category: Optional[str] = None
     address: Optional[str] = None
+    phone: Optional[str] = None
+    status: Optional[str] = None
     is_ad: bool = False
     fetched_at: str = field(default_factory=utcnow)
 
