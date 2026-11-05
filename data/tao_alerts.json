@@ -1,43 +1,43 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-05T16:46:35+00:00",
-  "previous_run": "2026-11-05T06:02:52+00:00",
+  "checked_at": "2026-11-05T20:09:08+00:00",
+  "previous_run": "2026-11-05T16:46:35+00:00",
   "alerts": [
     {
-      "netuid": 70,
-      "name": "Fugal",
-      "kind": "price_down",
-      "field": "price",
-      "old": 0.011657,
-      "new": 0.009724,
-      "change_pct": -16.58
-    },
-    {
-      "netuid": 70,
-      "name": "Fugal",
-      "kind": "mcap_down",
-      "field": "market cap",
-      "old": 733.78,
-      "new": 641.71,
-      "change_pct": -12.55
-    },
-    {
-      "netuid": 74,
-      "name": "Gittensor",
+      "netuid": 54,
+      "name": "Yanez",
       "kind": "price_up",
       "field": "price",
-      "old": 0.003283,
-      "new": 0.003931,
-      "change_pct": 19.74
+      "old": 0.004869,
+      "new": 0.005435,
+      "change_pct": 11.62
     },
     {
-      "netuid": 74,
-      "name": "Gittensor",
+      "netuid": 54,
+      "name": "Yanez",
       "kind": "mcap_up",
       "field": "market cap",
-      "old": 16140.0,
-      "new": 19330.0,
-      "change_pct": 19.76
+      "old": 27400.0,
+      "new": 30590.0,
+      "change_pct": 11.64
+    },
+    {
+      "netuid": 99,
+      "name": "Thirty Spokes",
+      "kind": "price_down",
+      "field": "price",
+      "old": 0.001111,
+      "new": 0.000942,
+      "change_pct": -15.21
+    },
+    {
+      "netuid": 99,
+      "name": "Thirty Spokes",
+      "kind": "mcap_down",
+      "field": "market cap",
+      "old": 1030.0,
+      "new": 873.35,
+      "change_pct": -15.21
     }
   ]
 }
