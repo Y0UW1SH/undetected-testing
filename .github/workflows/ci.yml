@@ -82,6 +82,9 @@ jobs:
               raw_chatgpt.py --debug
               raw_handle_alerts.py --xvfb
               raw_ipify.py
+              # bot.sannysoft.com reports one failed check on ARM64
+              # Chromium, so this runs on x86 where it passes.
+              raw_cdp_mode.py --debug
 
           - name: cdp-network-ubuntu
             os: ubuntu-latest
@@ -122,7 +125,6 @@ jobs:
               raw_cdp_etsy.py --debug
               raw_wsform.py --debug
               raw_consultapublica.py --debug
-              raw_cdp_mode.py --debug
               raw_serienstream.py --debug
 
     steps:
