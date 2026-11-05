@@ -13,6 +13,7 @@ import html
 import json
 import os
 import sys
+from datetime import datetime, timedelta
 
 import seo
 from seo import cli as seo_cli
@@ -94,6 +95,19 @@ def _fmt(value, digits=4):
 
 
 # ---- commands ---------------------------------------------------------------
+def _new_stamp(store):
+    """A run stamp strictly later than the last stored one, so two runs
+    inside the same second still form two batches."""
+    stamp = utcnow()
+    row = store.conn.execute(
+        "SELECT MAX(fetched_at) AS m FROM %s" % TABLE).fetchone()
+    last = row["m"] if row else None
+    if last and stamp <= last:
+        when = datetime.fromisoformat(last) + timedelta(seconds=1)
+        stamp = when.isoformat()
+    return stamp
+
+
 def _fetch_and_save(args, store):
     with seo_cli._session(args) as s:
         rows = taostats.fetch_subnets(s)
@@ -102,7 +116,7 @@ def _fetch_and_save(args, store):
             "No subnet table found on %s. Capture the page with "
             "`seo capture taostats --out page.html` and refresh the parser."
             % taostats.SUBNETS_URL)
-    store.save(rows, stamp=utcnow())
+    store.save(rows, stamp=_new_stamp(store))
     return rows
 
 
@@ -181,7 +195,8 @@ def cmd_watch(args, store):
     if not alerts and previous:
         print("No moves beyond %.1f%% since %s." % (
             threshold, previous[0]["fetched_at"]))
-    out = os.path.join(os.path.dirname(store.path) or ".", "tao_alerts.json")
+    out = args.alerts_out
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
         json.dump({"threshold_pct": threshold, "checked_at": utcnow(),
                    "previous_run": previous[0]["fetched_at"]
@@ -191,13 +206,17 @@ def cmd_watch(args, store):
 
 
 CSS = """
-body{font-family:system-ui,sans-serif;margin:24px;color:#111;max-width:1100px}
+body{font-family:system-ui,sans-serif;margin:24px;color:#111;
+max-width:1100px}
 h1{margin-bottom:0}h2{margin-top:32px;border-bottom:1px solid #ddd}
-table{border-collapse:collapse;width:100%}th,td{text-align:right;padding:4px 8px;
-border-bottom:1px solid #eee;font-size:14px}th{background:#f6f6f6}
-td:nth-child(2),th:nth-child(2){text-align:left}.muted{color:#666;font-size:13px}
-.up{color:#15803d}.down{color:#b91c1c}.warn{background:#fff7ed;padding:6px 10px;
-border-left:4px solid #ea580c;margin:6px 0}
+table{border-collapse:collapse;width:100%}
+th,td{text-align:right;padding:4px 8px;border-bottom:1px solid #eee;
+font-size:14px}th{background:#f6f6f6}
+td:nth-child(2),th:nth-child(2){text-align:left}
+.muted{color:#666;font-size:13px}
+.up{color:#15803d}.down{color:#b91c1c}
+.warn{background:#fff7ed;padding:6px 10px;border-left:4px solid #ea580c;
+margin:6px 0}
 """
 
 
@@ -282,8 +301,8 @@ def cmd_init(args, store):
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=2)
         fh.write("\n")
-    print("Wrote %s:\n%s\nNext: `tao watch`" % (path, json.dumps(cfg,
-                                                                indent=2)))
+    print("Wrote %s:\n%s\nNext: `tao watch`" % (
+        path, json.dumps(cfg, indent=2)))
     return 0
 
 
@@ -324,6 +343,8 @@ def build_parser():
                     help="(watch always fetches; kept for symmetry)")
     sp.add_argument("--fail-on-alert", action="store_true",
                     help="exit 2 when any alert fires")
+    sp.add_argument("--alerts-out",
+                    default=os.path.join("data", "tao_alerts.json"))
     sp.set_defaults(func=cmd_watch)
 
     sp = sub.add_parser("report", help="write an HTML report")

@@ -316,8 +316,8 @@ def render_report(store, threshold=10.0):
         if not latest:
             continue
         latest.sort(key=lambda r: r["position"])
-        parts.append("<h2>%s: %s</h2>" % (_esc(source.capitalize()),
-                                            _esc(query)))
+        parts.append("<h2>%s: %s</h2>" % (
+            _esc(source.capitalize()), _esc(query)))
         parts.append("<div class='muted'>fetched %s, %d items%s</div>" % (
             _esc(latest[0]["fetched_at"]), len(latest),
             ", previous run %s" % _esc(previous[0]["fetched_at"])
