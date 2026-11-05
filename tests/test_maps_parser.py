@@ -33,6 +33,25 @@ def test_build_maps_url():
     assert maps.build_maps_url("plumber austin", 30.1, -97.2) == (
         "https://www.google.com/maps/search/plumber%20austin/"
         "@30.1,-97.2,14z?hl=en")
+    # a slash in the query must not split the path
+    assert maps.build_maps_url("24/7 plumber", 30.1, -97.2) == (
+        "https://www.google.com/maps/search/24%2F7%20plumber/"
+        "@30.1,-97.2,14z?hl=en")
+
+
+def test_phone_area_code_is_not_a_review_count():
+    html = """<div role="feed"><div><div>
+      <a href="https://www.google.com/maps/place/X/data=!1s0x1:0x2a"
+         aria-label="No Rating Pipes"></a>
+      <div><div>No Rating Pipes</div><div>No reviews</div>
+      <div>Plumber · 1 Side St</div><div>Open 24 hours</div>
+      <div>(512) 555-0100</div></div></div></div></div>"""
+    biz = maps.parse_feed(html, "q")
+    assert len(biz) == 1
+    assert biz[0].reviews is None and biz[0].rating is None
+    assert biz[0].phone == "(512) 555-0100"
+    assert biz[0].category == "Plumber"
+    assert biz[0].address == "1 Side St"
     assert maps.build_maps_url("x") == (
         "https://www.google.com/maps/search/x?hl=en")
 

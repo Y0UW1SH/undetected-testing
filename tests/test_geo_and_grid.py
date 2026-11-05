@@ -62,12 +62,31 @@ def test_geocode_with_injected_opener():
 
     def opener(req, timeout):
         assert "nominatim" in req.full_url
+        assert "addressdetails=1" in req.full_url
         assert req.get_header("User-agent")
         return Resp(b'[{"lat": "30.27", "lon": "-97.74", '
-                    b'"display_name": "Austin, Texas"}]')
+                    b'"display_name": "Austin, Travis County, Texas, US", '
+                    b'"address": {"city": "Austin", "county": "Travis", '
+                    b'"state": "Texas", "country": "United States"}}]')
 
     assert geo.geocode("Austin, TX", opener=opener) == (
-        30.27, -97.74, "Austin, Texas")
+        30.27, -97.74, "Austin, Travis County, Texas, US",
+        "Austin,Texas,United States")
+
+
+def test_canonical_from_address():
+    assert geo.canonical_from_address(
+        {"city": "Austin", "state": "Texas", "country": "United States"}
+    ) == "Austin,Texas,United States"
+    assert geo.canonical_from_address(
+        {"town": "Nice", "state": "Provence-Alpes-Côte d'Azur",
+         "country": "France"}) == "Nice,Provence-Alpes-Côte d'Azur,France"
+    # city-state like Singapore: no duplicated region
+    assert geo.canonical_from_address(
+        {"city": "Singapore", "state": "Singapore",
+         "country": "Singapore"}) == "Singapore,Singapore"
+    assert geo.canonical_from_address({"country": "France"}) is None
+    assert geo.canonical_from_address({}) is None
 
 
 def test_grid_summary_and_heatmap(tmp_path):

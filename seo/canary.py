@@ -18,21 +18,33 @@ DEFAULT_QUERIES = [
 
 def run(queries=None, per_session=1, mobile=False, proxy=None,
         session_factory=Session):
+    """Every query ends up with exactly one record: ok, challenge, error,
+    or skipped (not attempted because its session was abandoned after a
+    challenge or failed to start), so summarize() can report the
+    challenge rate over the queries that were really attempted."""
     queries = list(queries or DEFAULT_QUERIES)
     records = []
-    i = 0
-    while i < len(queries):
-        batch = queries[i:i + per_session]
-        i += per_session
+    for start in range(0, len(queries), per_session):
+        batch = queries[start:start + per_session]
+        attempted = 0
         try:
             with session_factory(mobile=mobile, proxy=proxy) as s:
                 for q in batch:
-                    records.append(_one(s, q))
-                    if records[-1].outcome == "challenge":
-                        break   # this IP is burnt; new session next
-        except Exception as e:  # browser failed to start, etc.
+                    attempted += 1
+                    rec = _one(s, q)
+                    records.append(rec)
+                    if rec.outcome == "challenge":
+                        break   # this IP/session is burnt
+        except Exception as e:  # browser failed to start or to close
+            if attempted < len(batch):
+                records.append(models.CanaryRun(
+                    query=batch[attempted], outcome="error",
+                    detail=str(e)[:200]))
+                attempted += 1
+        for q in batch[attempted:]:
             records.append(models.CanaryRun(
-                query=batch[0], outcome="error", detail=str(e)[:200]))
+                query=q, outcome="skipped",
+                detail="not attempted: session abandoned"))
     return records
 
 
@@ -50,9 +62,10 @@ def _one(session, query):
 
 
 def summarize(records):
-    total = len(records)
     counts = {}
     for r in records:
         counts[r.outcome] = counts.get(r.outcome, 0) + 1
-    rate = 100.0 * counts.get("challenge", 0) / total if total else 0.0
-    return {"total": total, "challenge_rate_pct": round(rate, 1), **counts}
+    attempted = sum(v for k, v in counts.items() if k != "skipped")
+    rate = 100.0 * counts.get("challenge", 0) / attempted if attempted else 0
+    return {"total": len(records), "attempted": attempted,
+            "challenge_rate_pct": round(rate, 1), **counts}

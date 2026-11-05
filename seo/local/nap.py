@@ -67,7 +67,7 @@ def address_matches(reference, text):
     checks = []
     if number:
         checks.append(" %s " % number in " %s " % hay)
-    checks.extend(w in hay for w in street)
+    checks.extend(" %s " % w in " %s " % hay for w in street)
     checks.extend(" %s " % z in " %s " % hay for z in zips)
     return bool(checks) and all(checks)
 

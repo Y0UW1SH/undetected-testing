@@ -56,7 +56,8 @@ class Storage:
             )
         cur.execute(
             "CREATE TABLE IF NOT EXISTS geocode_cache "
-            "(place TEXT PRIMARY KEY, lat REAL, lng REAL, display TEXT)"
+            "(place TEXT PRIMARY KEY, lat REAL, lng REAL, display TEXT, "
+            "canonical TEXT)"
         )
         self.conn.commit()
 
@@ -124,15 +125,17 @@ class Storage:
     # ---- geocode cache -------------------------------------------------
     def cached_geocode(self, place):
         row = self.conn.execute(
-            "SELECT lat, lng, display FROM geocode_cache WHERE place = ?",
-            (place.lower(),),
+            "SELECT lat, lng, display, canonical FROM geocode_cache "
+            "WHERE place = ?", (place.lower(),),
         ).fetchone()
-        return (row["lat"], row["lng"], row["display"]) if row else None
+        if row is None:
+            return None
+        return row["lat"], row["lng"], row["display"], row["canonical"]
 
-    def cache_geocode(self, place, lat, lng, display):
+    def cache_geocode(self, place, lat, lng, display, canonical=None):
         self.conn.execute(
-            "INSERT OR REPLACE INTO geocode_cache VALUES (?, ?, ?, ?)",
-            (place.lower(), lat, lng, display),
+            "INSERT OR REPLACE INTO geocode_cache VALUES (?, ?, ?, ?, ?)",
+            (place.lower(), lat, lng, display, canonical),
         )
         self.conn.commit()
 

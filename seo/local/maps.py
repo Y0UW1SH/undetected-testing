@@ -6,11 +6,11 @@ import urllib.parse
 from bs4 import BeautifulSoup
 
 from seo import models
+from seo.textutil import paren_count
 
 MAPS_SEARCH = "https://www.google.com/maps/search/{q}/@{lat},{lng},{zoom}z"
 MAPS_SEARCH_NOGEO = "https://www.google.com/maps/search/{q}"
 STARS_RE = re.compile(r"([\d.]+)\s+stars?\s*(?:([\d,]+)\s+reviews?)?", re.I)
-PAREN_RE = re.compile(r"\(([\d,]+)\)")
 PHONE_RE = re.compile(r"^\+?[\d(][\d\s().-]{6,}\d$")
 REVIEWS_TOKEN_RE = re.compile(r"^\([\d,]+\)$")
 RATING_TOKEN_RE = re.compile(r"^\d(\.\d)?$")
@@ -26,7 +26,7 @@ END_OF_LIST = "You've reached the end of the list"
 
 
 def build_maps_url(query, lat=None, lng=None, zoom=14, hl="en"):
-    q = urllib.parse.quote(query)
+    q = urllib.parse.quote(query, safe="")
     if lat is None or lng is None:
         url = MAPS_SEARCH_NOGEO.format(q=q)
     else:
@@ -62,9 +62,7 @@ def _rating_reviews(card):
                 reviews = int(m.group(2).replace(",", ""))
             break
     if reviews is None:
-        m = PAREN_RE.search(card.get_text(" ", strip=True))
-        if m:
-            reviews = int(m.group(1).replace(",", ""))
+        reviews = paren_count(card)
     return rating, reviews
 
 

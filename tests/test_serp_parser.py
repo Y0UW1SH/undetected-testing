@@ -69,6 +69,30 @@ def test_flatten_counts(fixture):
     assert len(google.flatten(parsed)) == 3 + 2 + 2 + 1 + 3
 
 
+def test_result_without_snippet_does_not_borrow_a_neighbours(fixture):
+    html = fixture("google_serp_desktop.html").replace(
+        '<div class="g">\n    <a href="https://www.joesplumbing.example/'
+        'emergency"><h3>Duplicate link to Joe\'s</h3></a>\n  </div>',
+        '<div class="g"><a href="https://bare.example/"><h3>Bare result'
+        '</h3></a></div>')
+    parsed = google.parse_serp(html, "q")
+    bare = [r for r in parsed["organic"] if r.domain == "bare.example"]
+    assert len(bare) == 1
+    assert bare[0].snippet in (None, "")
+    first = parsed["organic"][0]
+    assert first.snippet.startswith("Fast 24-hour")
+
+
+def test_local_pack_phone_is_not_a_review_count():
+    html = """<div id="rso"><div data-cid="1">
+      <div role="heading">Joe's</div>
+      <div>Plumber · 1 Main St</div>
+      <div>(512) 555-0100</div></div></div>"""
+    pack = google.parse_serp(html, "q")["local_pack"]
+    assert pack[0].reviews is None
+    assert pack[0].category == "Plumber"
+
+
 def test_empty_page_parses_to_nothing():
     parsed = google.parse_serp("<html><body></body></html>", "q")
     assert all(not v for v in parsed.values())

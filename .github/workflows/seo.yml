@@ -27,6 +27,9 @@ jobs:
     timeout-minutes: 60
     env:
       PY_COLORS: "1"
+      # Committed back to the repo so fetched-today de-duplication,
+      # snapshot diffs and rank history survive between runs.
+      SEO_DB: data/ci.sqlite
     steps:
       - uses: actions/checkout@v6
 
@@ -42,7 +45,7 @@ jobs:
 
       - name: Canary (how often does Google challenge this runner?)
         run: |
-          python -m seo canary --queries 5 --per-session 1 \
+          python -m seo --db "$SEO_DB" canary --queries 5 --per-session 1 \
             --fail-above 80 || echo "::warning::High challenge rate"
 
       - name: Run tracked keywords
@@ -57,12 +60,12 @@ jobs:
           fi
           PROXY_ARG=""
           if [ -n "$SEO_PROXY" ]; then PROXY_ARG="--proxy $SEO_PROXY"; fi
-          python -m seo batch --config "$CONFIG" --per-session 3 \
-            --on-challenge stop $PROXY_ARG
+          python -m seo --db "$SEO_DB" batch --config "$CONFIG" \
+            --per-session 3 --on-challenge stop $PROXY_ARG
 
       - name: Export tables
         if: always()
-        run: python -m seo export --format csv
+        run: python -m seo --db "$SEO_DB" export --format csv
 
       - name: Upload results
         if: always()
@@ -74,12 +77,12 @@ jobs:
             downloaded_files/
           if-no-files-found: ignore
 
-      - name: Commit CSV exports
+      - name: Commit database and CSV exports
         if: ${{ github.event_name != 'pull_request' && inputs.canary_only != true }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/*.csv data/*.html 2>/dev/null || true
+          git add "$SEO_DB" data/*.csv data/*.html 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "No data changes to commit."
           else

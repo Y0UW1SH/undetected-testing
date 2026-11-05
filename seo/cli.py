@@ -26,20 +26,20 @@ from seo.serp import google
 
 def _resolve_location(store, text, lat=None, lng=None):
     """Return (lat, lng, canonical_name, label). Uses explicit
-    coordinates if given, else the geocode cache, else Nominatim."""
+    coordinates if given, else the geocode cache, else Nominatim. The
+    canonical name used for Google's uule parameter comes from the
+    geocoder's address details ("Austin,Texas,United States"), never
+    from the raw text, which may hold abbreviations or no country."""
     if lat is not None and lng is not None:
         return lat, lng, None, text or "%s,%s" % (lat, lng)
     if not text:
         return None, None, None, ""
     cached = store.cached_geocode(text)
     if cached is None:
-        g_lat, g_lng, display = geo.geocode(text)
-        store.cache_geocode(text, g_lat, g_lng, display)
+        g_lat, g_lng, display, canonical = geo.geocode(text)
+        store.cache_geocode(text, g_lat, g_lng, display, canonical)
     else:
-        g_lat, g_lng, display = cached
-    parts = [p.strip() for p in text.split(",")]
-    canonical = geo.canonical_name(parts[0], parts[1] if len(parts) > 1
-                                   else None)
+        g_lat, g_lng, display, canonical = cached
     return g_lat, g_lng, canonical, text
 
 
@@ -185,6 +185,61 @@ def cmd_canary(args, store):
     return 0
 
 
+def _batch_groups(config):
+    """Jobs from a config, grouped by (location, device) so that a
+    browser session is only ever shared by jobs that need the same
+    emulated location and device."""
+    blocks = config if isinstance(config, list) else [config]
+    groups = {}
+    for block in blocks:
+        loc = block.get("location", "")
+        device = block.get("device", "desktop")
+        jobs = groups.setdefault((loc, device), [])
+        for q in block.get("serp", []):
+            jobs.append({"kind": "serp", "query": q})
+        for q in block.get("local", []):
+            jobs.append({"kind": "local", "query": q})
+        for g in block.get("grid", []):
+            jobs.append({"kind": "grid", "query": g["query"], "extra": g})
+    return groups
+
+
+def _job_done_today(store, job, label, device):
+    kind, q = job["kind"], job["query"]
+    if kind == "serp":
+        return store.fetched_today("serp_results", query=q, location=label,
+                                   device=device)
+    if kind == "local":
+        return store.fetched_today("businesses", query=q, location=label)
+    return store.fetched_today("grid_cells", keyword=q,
+                               target=job["extra"]["target"], center=label)
+
+
+def _run_job(s, store, args, job, device, lat, lng, canonical, label):
+    kind, q = job["kind"], job["query"]
+    if kind == "serp":
+        parsed = google.fetch_serp(s, q, canonical, device, 1, label)
+        store.save(google.flatten(parsed))
+        _report_serp(parsed, 1)
+    elif kind == "local":
+        biz = maps.fetch_listings(s, q, lat, lng, label,
+                                  max_results=args.max)
+        store.save(biz)
+        print("    %d listings" % len(biz))
+    else:
+        if lat is None or lng is None:
+            raise ValueError("grid job %r needs a block 'location'" % q)
+        extra = job["extra"]
+        cells = grid_mod.run_grid(
+            s, q, extra["target"], lat, lng, size=extra.get("size", 5),
+            spacing_km=extra.get("spacing_km", 1.0), center_label=label)
+        store.save(cells, stamp=utcnow())
+        _print_json(grid_mod.summarize(cells))
+        out = "data/grid_%s.html" % grid_mod.normalize_name(
+            extra["target"]).replace(" ", "_")
+        grid_mod.heatmap_html(cells, out)
+
+
 def cmd_batch(args, store):
     """Run every job in a JSON config, rotating the browser session every
     --per-session jobs so one flagged IP/session does not poison the rest.
@@ -194,73 +249,65 @@ def cmd_batch(args, store):
        "serp": ["emergency plumber", "water heater repair"],
        "local": ["plumber"],
        "grid": [{"query": "plumber", "target": "Joe's Plumbing"}]}
-    A list of such objects is also accepted.
+    A list of such objects is also accepted. Jobs that already ran today
+    for the same location/device are skipped unless --force is given.
+    A job that fails for a reason other than a Google challenge is
+    counted as an error and the run continues.
     """
     with open(args.config, encoding="utf-8") as fh:
         config = json.load(fh)
-    blocks = config if isinstance(config, list) else [config]
-    jobs = []
-    for block in blocks:
-        loc = block.get("location", "")
-        device = block.get("device", "desktop")
-        for q in block.get("serp", []):
-            jobs.append(("serp", q, loc, device, None))
-        for q in block.get("local", []):
-            jobs.append(("local", q, loc, device, None))
-        for g in block.get("grid", []):
-            jobs.append(("grid", g["query"], loc, device, g))
-    done = challenged = skipped = 0
-    i = 0
-    while i < len(jobs):
-        batch = jobs[i:i + args.per_session]
-        i += args.per_session
-        kind, q, loc, device, extra = batch[0]
-        lat, lng, canonical, label = _resolve_location(store, loc)
-        geoloc = (lat, lng) if lat is not None else None
-        mobile = device == "mobile"
+    counts = {"done": 0, "skipped": 0, "errors": 0,
+              "challenged_sessions": 0}
+    stop = False
+    for (loc, device), jobs in _batch_groups(config).items():
+        if stop:
+            break
         try:
-            with Session(geoloc=geoloc, mobile=mobile, proxy=args.proxy,
-                         headless=args.headless) as s:
-                for kind, q, loc, device, extra in batch:
-                    table = {"serp": "serp_results", "local": "businesses",
-                             "grid": "grid_cells"}[kind]
-                    key = {"query": q} if kind != "grid" else {"keyword": q}
-                    if not args.force and store.fetched_today(table, **key):
-                        skipped += 1
-                        continue
-                    print(">>> %s %r @ %s" % (kind, q, label or "anywhere"))
-                    if kind == "serp":
-                        parsed = google.fetch_serp(s, q, canonical, device,
-                                                   1, label)
-                        store.save(google.flatten(parsed))
-                        _report_serp(parsed, 1)
-                    elif kind == "local":
-                        biz = maps.fetch_listings(s, q, lat, lng, label,
-                                                  max_results=args.max)
-                        store.save(biz)
-                        print("    %d listings" % len(biz))
-                    else:
-                        cells = grid_mod.run_grid(
-                            s, q, extra["target"], lat, lng,
-                            size=extra.get("size", 5),
-                            spacing_km=extra.get("spacing_km", 1.0),
-                            center_label=label)
-                        store.save(cells, stamp=utcnow())
-                        _print_json(grid_mod.summarize(cells))
-                        out = "data/grid_%s.html" % grid_mod.normalize_name(
-                            extra["target"]).replace(" ", "_")
-                        grid_mod.heatmap_html(cells, out)
-                    done += 1
-                    s.pause()
-        except ChallengeError as e:
-            challenged += 1
-            print("CHALLENGED, abandoning this session: %s" % e,
+            lat, lng, canonical, label = _resolve_location(store, loc)
+        except Exception as e:
+            print("Cannot resolve location %r: %s" % (loc, e),
                   file=sys.stderr)
-            if args.on_challenge == "stop":
-                break
-    _print_json({"done": done, "skipped": skipped,
-                 "challenged_sessions": challenged})
-    return 3 if challenged and not done else 0
+            counts["errors"] += len(jobs)
+            continue
+        pending = [j for j in jobs
+                   if args.force or not _job_done_today(store, j, label,
+                                                        device)]
+        counts["skipped"] += len(jobs) - len(pending)
+        geoloc = (lat, lng) if lat is not None else None
+        for start in range(0, len(pending), args.per_session):
+            batch = pending[start:start + args.per_session]
+            try:
+                with Session(geoloc=geoloc, mobile=device == "mobile",
+                             proxy=args.proxy, headless=args.headless) as s:
+                    for job in batch:
+                        print(">>> %s %r @ %s [%s]" % (
+                            job["kind"], job["query"], label or "anywhere",
+                            device))
+                        try:
+                            _run_job(s, store, args, job, device, lat, lng,
+                                     canonical, label)
+                            counts["done"] += 1
+                        except ChallengeError:
+                            raise
+                        except Exception as e:
+                            counts["errors"] += 1
+                            print("ERROR in %s %r: %s" % (
+                                job["kind"], job["query"], e),
+                                file=sys.stderr)
+                        s.pause()
+            except ChallengeError as e:
+                counts["challenged_sessions"] += 1
+                print("CHALLENGED, abandoning this session: %s" % e,
+                      file=sys.stderr)
+                if args.on_challenge == "stop":
+                    stop = True
+                    break
+    _print_json(counts)
+    if counts["done"]:
+        return 0
+    if counts["challenged_sessions"]:
+        return 3
+    return 1 if counts["errors"] else 0
 
 
 def cmd_export(args, store):
@@ -339,6 +386,7 @@ def build_parser():
     sp.add_argument("--city", default="")
     sp.add_argument("--mobile", action="store_true")
     sp.add_argument("--proxy")
+    sp.add_argument("--headless", action="store_true")
     sp.set_defaults(func=cmd_nap)
 
     sp = sub.add_parser("canary", help="measure Google challenge rate")
@@ -373,6 +421,7 @@ def build_parser():
     sp.add_argument("--out", required=True)
     sp.add_argument("--mobile", action="store_true")
     sp.add_argument("--proxy")
+    sp.add_argument("--headless", action="store_true")
     sp.set_defaults(func=cmd_capture)
     return p
 

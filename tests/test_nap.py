@@ -19,6 +19,8 @@ def test_address_matches_with_abbreviations():
     assert nap.address_matches(ref, "123 Main St, Austin 78702") is False
     assert nap.address_matches(ref, "456 Main St 78701") is False
     assert nap.address_matches("", "anything") is None
+    # "st" must match the word, not the substring in "Austin"
+    assert nap.address_matches("123 Main St", "123 Austin Rd") is False
 
 
 def test_directory_detection_and_filtering():

@@ -16,13 +16,14 @@ from bs4 import BeautifulSoup
 
 from seo import models
 from seo.geo import uule
+from seo.textutil import paren_count
 
 SEARCH_URL = "https://www.google.com/search"
 GOOGLE_HOSTS = ("google.", "googleusercontent.", "gstatic.", "youtube.")
 RATING_RE = re.compile(
     r"Rated\s+([\d.]+)\s+out of\s+5(?:,)?\s*(?:([\d,]+)\s+reviews?)?", re.I
 )
-PAREN_COUNT_RE = re.compile(r"\(([\d,]+)\)")
+SHARED_IDS = ("rso", "search", "center_col", "main", "rcnt")
 
 
 def build_url(query, canonical_location=None, device="desktop", page=1,
@@ -72,27 +73,35 @@ def _text(node, limit=400):
     return text[:limit] if text else None
 
 
+def _result_block(anchor):
+    """Smallest ancestor that holds this result but no other result's
+    title link, so a result without a description never borrows the
+    snippet of a neighbour."""
+    block = anchor
+    for _ in range(6):
+        parent = block.parent
+        if parent is None or parent.name in ("body", "html"):
+            break
+        if parent.get("id") in SHARED_IDS:
+            break
+        if len(parent.select("a[href] h3")) > 1:
+            break
+        block = parent
+    return block
+
+
 def _snippet_for(anchor):
-    """Walk up from the title link to the result block and pull the
-    description text out of it."""
-    for depth, ancestor in enumerate(anchor.parents):
-        if depth > 6 or ancestor.name in ("body", "html", None):
-            break
-        node = ancestor.select_one(
-            '[data-sncf], .VwiC3b, div[style*="line-clamp"], '
-            'div[data-content-feature="1"]'
-        )
-        if node is not None:
-            return _text(node)
-    # Fallback: block text minus the title.
-    block = anchor.parent
-    for _ in range(3):
-        if block is not None and len(block.get_text(strip=True)) > 80:
-            break
-        block = block.parent if block is not None else None
+    block = _result_block(anchor)
+    node = block.select_one(
+        '[data-sncf], .VwiC3b, div[style*="line-clamp"], '
+        'div[data-content-feature="1"]'
+    )
+    if node is not None:
+        return _text(node)
     text = _text(block)
-    if text and anchor.get_text(strip=True) in text:
-        text = text.replace(anchor.get_text(strip=True), "", 1).strip()
+    title = anchor.get_text(strip=True)
+    if text and title in text:
+        text = text.replace(title, "", 1).strip()
     return text or None
 
 
@@ -163,9 +172,7 @@ def parse_serp(html, query, location="", device="desktop", page=1):
                 if m.group(2):
                     reviews = int(m.group(2).replace(",", ""))
         if reviews is None:
-            m = PAREN_COUNT_RE.search(card.get_text(" ", strip=True))
-            if m:
-                reviews = int(m.group(1).replace(",", ""))
+            reviews = paren_count(card)
         lines = [ln.strip() for ln in card.get_text("\n").split("\n")
                  if ln.strip()]
         category = address = None

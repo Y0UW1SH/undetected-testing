@@ -3,6 +3,7 @@ import os
 from seo import canary, models, storage
 from seo.browser import Session, is_challenge_page
 from seo.models import ChallengeError
+from tests.fakes import FakeBrowser
 
 
 def test_is_challenge_page(fixture):
@@ -17,47 +18,6 @@ def test_is_challenge_page(fixture):
     # the real thing, captured from a datacenter IP
     assert is_challenge_page("https://www.google.com/search?q=a", "",
                              fixture("live_google_sorry.html"))
-
-
-class FakeBrowser:
-    """Stands in for sb_cdp.Chrome in tests."""
-
-    def __init__(self, pages):
-        self.pages = pages          # url -> (title, html)
-        self.current = None
-        self.clicked = []
-        self.solved = 0
-        self.quit_called = False
-
-    def goto(self, url):
-        self.current = url
-
-    def get_current_url(self):
-        return self.current
-
-    def get_title(self):
-        return self.pages.get(self.current, ("", ""))[0]
-
-    def get_page_source(self):
-        return self.pages.get(self.current, ("", ""))[1]
-
-    def is_element_visible(self, selector):
-        return False
-
-    def click(self, selector):
-        self.clicked.append(selector)
-
-    def solve_captcha(self):
-        self.solved += 1
-
-    def save_screenshot(self, *a, **k):
-        pass
-
-    def scroll_down(self, n):
-        pass
-
-    def quit(self):
-        self.quit_called = True
 
 
 def test_session_raises_on_persistent_challenge(fixture):
@@ -98,8 +58,10 @@ def test_storage_roundtrip_and_export(tmp_path):
     rows = store.rows("serp_results", query="q")
     assert rows[0]["domain"] == "a.example"
     assert store.cached_geocode("Austin, TX") is None
-    store.cache_geocode("Austin, TX", 30.2, -97.7, "Austin")
-    assert store.cached_geocode("austin, tx") == (30.2, -97.7, "Austin")
+    store.cache_geocode("Austin, TX", 30.2, -97.7, "Austin",
+                        "Austin,Texas,United States")
+    assert store.cached_geocode("austin, tx") == (
+        30.2, -97.7, "Austin", "Austin,Texas,United States")
     csv_path = store.export("serp_results", str(tmp_path), "csv")
     assert open(csv_path).read().splitlines()[0].startswith("id,query,")
     json_path = store.export("serp_results", str(tmp_path), "json")
@@ -155,4 +117,26 @@ def test_canary_summary_and_run_with_fake_sessions():
                          session_factory=FakeSession)
     assert [r.outcome for r in records] == ["ok", "challenge", "ok"]
     assert canary.summarize(records) == {
-        "total": 3, "challenge_rate_pct": 33.3, "ok": 2, "challenge": 1}
+        "total": 3, "attempted": 3, "challenge_rate_pct": 33.3,
+        "ok": 2, "challenge": 1}
+    # A challenge abandons the rest of a multi-query session: those
+    # queries are recorded as skipped, not silently dropped, and the
+    # rate is computed over attempted queries only.
+    FakeSession.calls = []
+    records = canary.run(["a", "best pizza", "c", "d", "e"],
+                         per_session=5, session_factory=FakeSession)
+    assert [r.outcome for r in records] == [
+        "ok", "challenge", "skipped", "skipped", "skipped"]
+    assert len(FakeSession.calls) == 2
+    summary = canary.summarize(records)
+    assert summary["total"] == 5 and summary["attempted"] == 2
+    assert summary["challenge_rate_pct"] == 50.0
+
+    class BrokenSession(FakeSession):
+        def __enter__(self):
+            raise RuntimeError("chrome did not start")
+
+    records = canary.run(["a", "b", "c"], per_session=3,
+                         session_factory=BrokenSession)
+    assert [r.outcome for r in records] == ["error", "skipped", "skipped"]
+    assert canary.summarize(records)["attempted"] == 1

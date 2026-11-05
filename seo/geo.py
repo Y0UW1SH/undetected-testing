@@ -38,11 +38,32 @@ def canonical_name(city, region=None, country="United States"):
     return ",".join(parts)
 
 
+def canonical_from_address(address):
+    """Google's canonical location name ("Austin,Texas,United States")
+    from a Nominatim address dict, or None if it lacks a city/country."""
+    city = None
+    for key in ("city", "town", "village", "municipality", "county"):
+        if address.get(key):
+            city = address[key]
+            break
+    region = (address.get("state") or address.get("region")
+              or address.get("province"))
+    country = address.get("country")
+    if not city or not country:
+        return None
+    parts = [city]
+    if region and region != city:
+        parts.append(region)
+    parts.append(country)
+    return ",".join(p.strip() for p in parts)
+
+
 def geocode(place, opener=None):
-    """Resolve a free-text place to (lat, lng, display_name) with the
-    OpenStreetMap Nominatim API. `opener` is injectable for tests."""
+    """Resolve a free-text place with the OpenStreetMap Nominatim API.
+    Returns (lat, lng, display_name, canonical_name); canonical_name may
+    be None. `opener` is injectable for tests."""
     params = urllib.parse.urlencode(
-        {"q": place, "format": "json", "limit": 1}
+        {"q": place, "format": "json", "limit": 1, "addressdetails": 1}
     )
     req = urllib.request.Request(
         "%s?%s" % (NOMINATIM, params), headers={"User-Agent": USER_AGENT}
@@ -53,7 +74,9 @@ def geocode(place, opener=None):
     if not data:
         raise LookupError("No geocoding result for %r" % place)
     hit = data[0]
-    return float(hit["lat"]), float(hit["lon"]), hit.get("display_name")
+    canonical = canonical_from_address(hit.get("address") or {})
+    return (float(hit["lat"]), float(hit["lon"]), hit.get("display_name"),
+            canonical)
 
 
 def offset(lat, lng, north_km, east_km):
