@@ -32,6 +32,7 @@ from seo.local import grid as grid_mod
 from seo.local import maps, nap
 from seo.models import ChallengeError, MissingDependency, utcnow
 from seo.serp import google
+from seo.sources import reddit
 
 DEFAULT_CONFIG = os.path.join("seo", "config", "keywords.json")
 EXAMPLE_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -183,6 +184,23 @@ def cmd_snapshot(args, store):
     return 0
 
 
+def cmd_reddit(args, store):
+    """Reddit search: brand mentions, questions people ask, competitors."""
+    key = dict(query=args.query, sort=args.sort)
+    if not args.force and store.fetched_today("reddit_posts", **key):
+        print("Already fetched today; use --force to refetch.")
+        return 0
+    with _session(args) as s:
+        posts = reddit.fetch(s, args.query, args.subreddit, args.sort,
+                             args.time, args.limit)
+    for p in posts:
+        print("%2d. r/%-18s %5s pts %4s cmts  %s" % (
+            p.position, (p.subreddit or "")[:18], p.score, p.num_comments,
+            p.title[:70]))
+    print("Saved %d posts." % store.save(posts, stamp=utcnow()))
+    return 0
+
+
 def cmd_nap(args, store):
     with _session(args) as s:
         records = nap.audit(s, args.business, args.phone, args.address,
@@ -226,6 +244,10 @@ def _batch_groups(config):
             jobs.append({"kind": "local", "query": q})
         for g in block.get("grid", []):
             jobs.append({"kind": "grid", "query": g["query"], "extra": g})
+        for r in block.get("reddit", []):
+            if isinstance(r, str):
+                r = {"query": r}
+            jobs.append({"kind": "reddit", "query": r["query"], "extra": r})
     return groups
 
 
@@ -236,6 +258,10 @@ def _job_done_today(store, job, label, device):
                                    device=device)
     if kind == "local":
         return store.fetched_today("businesses", query=q, location=label)
+    if kind == "reddit":
+        return store.fetched_today(
+            "reddit_posts", query=q,
+            sort=job["extra"].get("sort", "relevance"))
     return store.fetched_today("grid_cells", keyword=q,
                                target=job["extra"]["target"], center=label)
 
@@ -251,6 +277,13 @@ def _run_job(s, store, args, job, device, lat, lng, canonical, label):
                                   max_results=args.max)
         store.save(biz)
         print("    %d listings" % len(biz))
+    elif kind == "reddit":
+        extra = job["extra"]
+        posts = reddit.fetch(s, q, extra.get("subreddit"),
+                             extra.get("sort", "relevance"),
+                             extra.get("time", "all"), extra.get("limit", 25))
+        store.save(posts, stamp=utcnow())
+        print("    %d posts" % len(posts))
     else:
         if lat is None or lng is None:
             raise ValueError("grid job %r needs a block 'location'" % q)
@@ -411,7 +444,7 @@ def cmd_init(args, store):
         print("%s already exists (use --force to overwrite)." % path)
         return 1
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    if not (args.serp or args.local or args.target):
+    if not (args.serp or args.local or args.target or args.reddit):
         shutil.copyfile(EXAMPLE_CONFIG, path)
         print("Copied the example config to %s. Edit the location and "
               "keywords, then run `seo batch`." % path)
@@ -421,6 +454,8 @@ def cmd_init(args, store):
         block["serp"] = args.serp
     if args.local:
         block["local"] = args.local
+    if args.reddit:
+        block["reddit"] = args.reddit
     if args.target:
         grid_query = args.local[0] if args.local else (
             args.serp[0] if args.serp else args.target)
@@ -475,6 +510,8 @@ def build_parser():
                     metavar="KEYWORD", help="web-search keyword (repeat)")
     sp.add_argument("--local", action="append", default=[],
                     metavar="KEYWORD", help="Maps keyword (repeat)")
+    sp.add_argument("--reddit", action="append", default=[],
+                    metavar="KEYWORD", help="Reddit search (repeat)")
     sp.add_argument("--target", help="your business name for a rank grid")
     sp.add_argument("--grid-size", type=int, default=5)
     sp.add_argument("--grid-spacing", type=float, default=1.0)
@@ -524,6 +561,18 @@ def build_parser():
     loc_args(sp)
     sp.add_argument("--max", type=int, default=10)
     sp.set_defaults(func=cmd_snapshot)
+
+    sp = sub.add_parser("reddit", help="Reddit search results")
+    sp.add_argument("query")
+    sp.add_argument("--subreddit", help="limit to one subreddit")
+    sp.add_argument("--sort", choices=reddit.SORTS, default="relevance")
+    sp.add_argument("--time", choices=reddit.TIMES, default="all")
+    sp.add_argument("--limit", type=int, default=25)
+    sp.add_argument("--force", action="store_true")
+    sp.add_argument("--mobile", action="store_true")
+    sp.add_argument("--proxy")
+    sp.add_argument("--headless", action="store_true")
+    sp.set_defaults(func=cmd_reddit)
 
     sp = sub.add_parser("nap", help="NAP consistency across directories")
     sp.add_argument("business")

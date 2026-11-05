@@ -49,7 +49,25 @@ python raw_walmart.py --debug
 
 --------
 
-## SERP and local-SEO scraper (`seo/`)
+## Three tools built on the stealth browser
+
+| Command    | Purpose | Sources | Docs |
+|------------|---------|---------|------|
+| `seo`      | SEO: rankings, local pack, Maps, rank grids, NAP, Reddit mentions | Google web search, Google Maps, Reddit, directory sites | below |
+| `research` | Product research: search results and price-change alerts | Amazon, eBay | [docs/research.md](docs/research.md) |
+| `tao`      | Bittensor subnet stats and prices with change warnings | taostats.io | [docs/tao.md](docs/tao.md) |
+
+Each tool has its own command, config file, SQLite database and GitHub
+Actions schedule (`seo.yml`, `research.yml`, `tao.yml`), so they can be
+run and triggered independently. One install provides all three:
+
+```bash
+python -m pip install --upgrade pip wheel setuptools
+pip install "git+https://github.com/Y0UW1SH/undetected-testing@master"
+seo doctor --browser     # checks the shared browser stack once
+```
+
+## SEO scraper (`seo`)
 
 The stealth browser these tests exercise is also wrapped as a small
 scraping tool. Everything goes through `seo/browser.py`, which opens a
@@ -115,6 +133,10 @@ python -m seo snapshot "plumber" --location "Austin, TX"
 # NAP consistency: does each directory list the same phone and address?
 python -m seo nap "Joe's Plumbing" --phone 512-555-0100 \
     --address "123 Main St, Austin, TX 78701" --city "Austin, TX"
+
+# Reddit: what people ask and which businesses they mention
+python -m seo reddit "emergency plumber austin" --sort new --limit 25
+python -m seo reddit "plumber recommendation" --subreddit Austin
 
 # Everything in a JSON config, new browser every 3 jobs, stop on challenge
 cp seo/config/keywords.example.json seo/config/keywords.json

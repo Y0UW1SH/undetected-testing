@@ -16,6 +16,9 @@ on:
       capture_serp:
         description: "Also save the live web-search page for this query as data/live_serp.html (parser fixture)"
         default: ""
+      capture_extra:
+        description: "Extra pages to capture as fixtures: kind:query pairs separated by commas, kinds amazon|ebay|reddit|maps|taostats, e.g. amazon:wireless mouse,ebay:wireless mouse,reddit:plumber austin,taostats:"
+        default: ""
 
 permissions:
   contents: write
@@ -69,6 +72,22 @@ jobs:
               for r in items[:5]:
                   print("   ", r.position, r.result_type, r.domain, (r.title or "")[:70])
           PY
+
+      - name: Capture extra pages as fixtures
+        if: ${{ inputs.capture_extra != '' }}
+        env:
+          CAPTURE_EXTRA: ${{ inputs.capture_extra }}
+        run: |
+          IFS=',' read -ra PAIRS <<< "$CAPTURE_EXTRA"
+          for pair in "${PAIRS[@]}"; do
+            kind="${pair%%:*}"; query="${pair#*:}"
+            kind="$(echo "$kind" | xargs)"; query="$(echo "$query" | xargs)"
+            [ -z "$kind" ] && continue
+            echo "::group::capture $kind '$query'"
+            python -m seo --db "$SEO_DB" capture "$kind" "$query" \
+              --out "data/live_${kind}.html" || echo "::warning::capture $kind failed"
+            echo "::endgroup::"
+          done
 
       - name: Run tracked keywords
         if: ${{ inputs.canary_only != true }}

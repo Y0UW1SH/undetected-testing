@@ -57,6 +57,35 @@ seo doctor --browser
   runners (x86 and ARM64), so `raw_cdp_mode.py` is not part of the CI
   matrix; run it locally.
 
+### Product research tool (`research`)
+
+* `research amazon QUERY` / `research ebay QUERY`: search results with
+  ASIN or item number, price, rating, review count, sponsored flag
+  (Amazon: Prime; eBay: condition and shipping).
+* `research track` runs a config of queries on a schedule and raises
+  price-change alerts between runs (`research alerts`, threshold in
+  percent); `research report` renders them. Own database
+  (`data/research.sqlite`) and workflow (`research.yml`).
+
+### Bittensor subnet tool (`tao`)
+
+* `tao subnets` collects every subnet's price, 24h/7d change, market
+  cap, emission and pool liquidity from taostats.io; `tao watch`
+  compares with the previous run and warns on moves beyond a threshold;
+  `tao report` renders the table and alerts. Own database
+  (`data/tao.sqlite`) and 4-hourly workflow (`tao.yml`).
+* The taostats parser is structural (header-name based) and was
+  written before a real page capture; the `seo capture taostats`
+  command and the SEO workflow's `capture_extra` input exist to refresh
+  it against the live page.
+
+### Reddit (under `seo`)
+
+* `seo reddit QUERY [--subreddit] [--sort] [--time]`: posts from
+  Reddit's search (JSON endpoint in the stealth browser, HTML fallback)
+  with subreddit, score, comments and permalink; `reddit` jobs in the
+  batch config; a Reddit section in `seo report`.
+
 ### Also in this release
 
 * The stealth test scripts now assert success, and the ten CI workflows

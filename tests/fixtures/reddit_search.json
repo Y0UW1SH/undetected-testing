@@ -1,0 +1,44 @@
+{
+ "kind": "Listing",
+ "data": {
+  "after": null,
+  "children": [
+   {
+    "kind": "t3",
+    "data": {
+     "id": "abc123",
+     "title": "Best emergency plumber in Austin?",
+     "subreddit": "Austin",
+     "author": "homeowner_tx",
+     "score": 57,
+     "num_comments": 23,
+     "permalink": "/r/Austin/comments/abc123/best_emergency_plumber_in_austin/",
+     "url": "https://www.reddit.com/r/Austin/comments/abc123/best_emergency_plumber_in_austin/",
+     "created_utc": 1761955200.0
+    }
+   },
+   {
+    "kind": "t3",
+    "data": {
+     "id": "def456",
+     "title": "Clarke Kent Plumbing saved my weekend",
+     "subreddit": "austinjobs",
+     "author": "jane_d",
+     "score": 12,
+     "num_comments": 4,
+     "permalink": "/r/austinjobs/comments/def456/clarke_kent_plumbing/",
+     "url": "https://imgur.com/x",
+     "created_utc": 1761868800.0
+    }
+   },
+   {
+    "kind": "t3",
+    "data": {
+     "id": "nolink",
+     "title": "",
+     "subreddit": "x"
+    }
+   }
+  ]
+ }
+}

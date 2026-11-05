@@ -138,6 +138,27 @@ def _grid_section(store, report_dir):
     return "\n".join(parts)
 
 
+def _reddit_section(store):
+    rows = store.rows("reddit_posts")
+    if not rows:
+        return ""
+    parts = ["<h2>Reddit</h2>"]
+    for (q, sort), items in _latest_batches(rows, ("query", "sort")).items():
+        parts.append("<h3>%s <span class='pill'>%s</span></h3>" % (
+            _esc(q), _esc(sort)))
+        parts.append("<div class='muted'>fetched %s</div>" % _esc(
+            items[0]["fetched_at"]))
+        items.sort(key=lambda r: r["position"])
+        parts.append(_table(
+            ["#", "Subreddit", "Title", "Score", "Comments"],
+            [[_esc(r["position"]), "r/" + _esc(r["subreddit"]),
+              "<a href='%s'>%s</a>" % (_esc(r["permalink"]),
+                                       _esc(r["title"]))
+              if r["permalink"] else _esc(r["title"]),
+              _esc(r["score"]), _esc(r["num_comments"])] for r in items]))
+    return "\n".join(parts)
+
+
 def _nap_section(store):
     rows = store.rows("nap_records")
     if not rows:
@@ -174,8 +195,8 @@ def _canary_section(store):
 
 def render(store, report_dir="data"):
     sections = [_serp_section(store), _local_section(store),
-                _grid_section(store, report_dir), _nap_section(store),
-                _canary_section(store)]
+                _grid_section(store, report_dir), _reddit_section(store),
+                _nap_section(store), _canary_section(store)]
     body = "\n".join(s for s in sections if s) or (
         "<p class='muted'>No data yet. Run <code>seo serp</code>, "
         "<code>seo local</code> or <code>seo batch</code> first.</p>")
