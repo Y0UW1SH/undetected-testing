@@ -53,6 +53,11 @@ def test_local_editor_save_and_watcher_override(tmp_path):
             headers = {"Content-Type": "application/json",
                        "Origin": "http://" + server.authority}
             with closing(HTTPConnection("127.0.0.1", server.server_port)) as c:
+                explorer = tmp_path / "explorer/network.html"
+                explorer.parent.mkdir()
+                explorer.write_text("portable network", encoding="utf8")
+                c.request("GET", "/network.html")
+                assert c.getresponse().read() == b"portable network"
                 for extra, expected in [({}, 403), (
                         {"X-Watchlist-Token": server.token,
                          "Origin": "https://other.invalid"}, 403), (

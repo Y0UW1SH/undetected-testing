@@ -238,12 +238,14 @@ def _archive(html, data, source, cache, output_dir=None):
         template = Path(__file__).with_name("wallet_view.html")
         identity = json.dumps([source.resolve().relative_to(
             cache.resolve()).as_posix(), source.stat().st_mtime_ns,
-            template.stat().st_mtime_ns])
+            template.stat().st_mtime_ns, "run-relative-directory"])
         info = [data["checked_at"], data.get("mode", "collection")]
         if (rows.get(run) != info or not archive.is_file()
                 or not version.is_file()
                 or version.read_text(encoding="utf8") != identity):
-            _write(archive, render(data))
+            archived = render(data).replace('href="accounts.html"',
+                                            'href="../accounts.html"')
+            _write(archive, archived)
             _write(version, identity)
             rows[run] = info
             changed = True

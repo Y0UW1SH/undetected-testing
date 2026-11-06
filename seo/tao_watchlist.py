@@ -204,6 +204,10 @@ class Handler(BaseHTTPRequestHandler):
                 page = model.cache / url.path[1:]
                 if page.name == "accounts.html":
                     page = model.cache / "accounts.html"
+                if url.path == "/network.html" and not page.is_file():
+                    fallback = (model.root / "explorer/network.html",
+                                model.cache / "network_from_reports.html")
+                    page = next((p for p in fallback if p.is_file()), page)
                 if page.is_file():
                     return self.reply(200, page.read_bytes(), "text/html")
             return self.reply(404, {"error": "No saved view at this path."})
