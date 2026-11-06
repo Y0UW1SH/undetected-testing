@@ -48,11 +48,12 @@ def _metric(wallet, board):
         m = wallet["open"]
         if board == "open":
             days = m.get("days_since_addition")
+            realized = _amount(tao_performance.economic_realized(wallet), True)
             age = (f", last observed addition {days:g} days ago"
                    if days is not None else "")
             return (f"{_amount(wallet['gross_unrealized_tao'], True)} TAO "
                     f"unrealized ({_amount(m['return_pct'], True)}%); "
-                    f"realized {_amount(wallet['realized_tao'], True)} TAO, "
+                    f"realized {realized} TAO, "
                     f"{wallet['priced_sales']} priced sales{age}")
         share = 100 * m["known_value_fraction"]
         unresolved = ("total open P/L unknown" if m["return_pct"] is None
@@ -63,7 +64,9 @@ def _metric(wallet, board):
                 + unresolved)
     if board == "profit_partial":
         covered = 100 * wallet["known_sale_value_fraction"]
-        return (f"{_amount(wallet['known_realized_tao'], True)} TAO realized "
+        gain = wallet.get("known_trading_realized_tao",
+                          wallet["known_realized_tao"])
+        return (f"{_amount(gain, True)} TAO trading price gain "
                 f"on confirmed units; cost traced for {covered:.1f}% of sale "
                 "proceeds, total realized P/L unknown")
     side = wallet["timing"][board]
@@ -114,6 +117,17 @@ def _partial_sales(row):
               "proceeds have unresolved cost.")
 
 
+def _growth_sales(row):
+    if row.get("growth_sales"):
+        economic = _amount(tao_performance.economic_realized(row), True)
+        trading = _amount(row.get("known_trading_realized_tao"), True)
+        earned = _amount(row.get("growth_proceeds_tao"))
+        print(f"  Economic realized {economic} TAO; confirmed trading price "
+              f"gain {trading} TAO; proven growth proceeds {earned} TAO. "
+              f"{row['growth_sales']} sales containing growth are excluded "
+              "from trading win counts.")
+
+
 def _print_position(p):
     quote = p.get("quote_at") or "unknown time"
     freshness = "current quote" if p.get("current_quote") else "older quote"
@@ -123,15 +137,22 @@ def _print_position(p):
         freshness += ", inventory unavailable this run"
     entry, mark = _amount(p["buy_price_tao"]), _amount(p["price_tao"])
     print(f"SN{p['netuid']}  {_amount(p['alpha'])} alpha, "
-          f"entry {entry}, mark {mark}"
+          f"original entry {entry}, mark {mark}"
           f" TAO/alpha ({freshness}, {quote})")
-    realized = (p["realized_tao"] if p["priced_sales"]
-                or not p["unpriced_sales"] else None)
+    realized = tao_performance.economic_realized(p)
     print(f"  marked value {_amount(p['marked_value_tao'])} TAO, "
           f"realized {_amount(realized, True)} TAO "
           f"({p['priced_sales']} priced, {p['unpriced_sales']} unpriced), "
           f"unrealized {_amount(p['gross_unrealized_tao'], True)} TAO")
     _partial_sales(p)
+    _growth_sales(p)
+    if p.get("growth_alpha"):
+        effective = _amount(p.get("effective_cost_per_alpha_tao"))
+        print(f"  effective cost {effective} "
+              f"TAO/alpha; proven growth {_amount(p['growth_alpha'])} alpha, "
+              f"growth value {_amount(p.get('growth_value_tao'))} TAO; "
+              "confirmed trading price gain "
+              f"{_amount(p.get('known_trading_unrealized_tao'), True)} TAO")
     print(f"  known {_amount(p['known_alpha'])} alpha "
           f"(cost {_amount(p['known_cost_tao'])} TAO), "
           f"estimated {_amount(p['probable_alpha'])} alpha "
@@ -187,9 +208,10 @@ def _print_detail(wallet, stamp, past):
     elif wallet["unpriced_sales"]:
         print(f"Realized P/L unknown. All {wallet['unpriced_sales']} sales "
               "include stake with unverified cost.")
-    else:
+    elif not wallet.get("growth_sales"):
         print("No sales observed.")
     _partial_sales(wallet)
+    _growth_sales(wallet)
     if "gross_unrealized_tao" in wallet:
         unrealized = _amount(wallet["gross_unrealized_tao"], True)
         total = _amount(wallet.get("gross_total_pnl_tao"), True)
@@ -222,8 +244,7 @@ def _print_detail(wallet, stamp, past):
         for row in past:
             ranks = "  ".join(str(row["ranks"].get(k) or "-").rjust(4)
                               for k in BOARDS)
-            realized = _amount(row["realized_tao"] if row["priced_sales"]
-                               or not row["unpriced_sales"] else None, True)
+            realized = _amount(tao_performance.economic_realized(row), True)
             unrealized = _amount(row.get("gross_unrealized_tao"), True)
             print(f"{row['checked_at']}  {ranks}  "
                   f"{realized:>12}  {unrealized:>14}")

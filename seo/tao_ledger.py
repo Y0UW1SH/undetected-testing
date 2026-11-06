@@ -58,7 +58,8 @@ def _inventory_endpoints(event):
 def _reallocation_pairs(events):
     # Moving stake to another validator can appear in the Taostats table as
     # an ordinary sell immediately followed by an ordinary buy. Require the
-    # exact same cash and token amounts and consecutive chain-event indices.
+    # same cash and consecutive chain-event indices. A one-nano token loss
+    # is a candidate only: it must be confirmed by the native receipt.
     fills = sorted((e for e in events if e["kind"] in ("sell", "buy")),
                    key=_chain_order)
     for sell, buy in zip(fills, fills[1:]):
@@ -68,7 +69,9 @@ def _reallocation_pairs(events):
                 and sell.get("extrinsic")
                 and sell["extrinsic"] == buy.get("extrinsic")
                 and sell["netuid"] == buy["netuid"]
-                and sell["alpha"] == buy["alpha"] and sell["tao"] == buy["tao"]
+                and sell["alpha"] is not None and buy["alpha"] is not None
+                and 0 <= sell["alpha"] - buy["alpha"] <= 1.1e-9
+                and sell["tao"] == buy["tao"]
                 and isinstance(sell.get("event_index"), int)
                 and buy.get("event_index") == sell["event_index"] + 1):
             yield sell, buy
@@ -91,8 +94,12 @@ def net_transfers(events, *, verified_moves=()):
     unique = {e["id"]: e for e in events}
     for sell, buy in _reallocation_pairs(unique.values()):
         verified = sell["extrinsic"] in verified_moves
+        loss = sell["alpha"] - buy["alpha"]
+        if loss and not verified:
+            continue
         unique[sell["id"]] = dict(
             sell, kind="stake_reallocation", dst=buy["dst"],
+            received_alpha=buy["alpha"], rounding_loss_alpha=loss,
             paired_event_id=buy["id"], evidence=(
                 "native_move" if verified else "matching_trade_legs"))
         del unique[buy["id"]]
@@ -248,6 +255,15 @@ class _Holding:
     # Sampled purchases explain basis without changing the aggregate ledger.
     # Key is (original buy, basis estimated somewhere along its path).
     origins: dict = field(default_factory=dict)
+    # Growth is covered by its source's basis provenance, but is not a buy.
+    growth: float = 0.
+    known_growth: float = 0.
+    probable_growth: float = 0.
+    origin_growth: dict = field(default_factory=dict)
+    # Paid units lost to a verified native rounding adjustment retain cost.
+    known_rounding: float = 0.
+    probable_rounding: float = 0.
+    origin_rounding: dict = field(default_factory=dict)
 
     def remove(self, qty):
         # Unknown units and both kinds of cost move in the same proportion
@@ -255,16 +271,38 @@ class _Holding:
         # larger than the observed balance has unknown cost on the excess.
         share = min(qty / self.alpha, 1.) if self.alpha else 0.
         portion = _Holding(qty, self.known * share, self.cost * share,
-                           self.probable * share, self.estimated_cost * share)
+                           self.probable * share, self.estimated_cost * share,
+                           growth=self.growth * share,
+                           known_growth=self.known_growth * share,
+                           probable_growth=self.probable_growth * share,
+                           known_rounding=self.known_rounding * share,
+                           probable_rounding=self.probable_rounding * share)
         for origin, units in self.origins.items():
             portion.origins[origin] = units * share
+        portion.origin_growth = {
+            origin: units * share
+            for origin, units in self.origin_growth.items()}
+        portion.origin_rounding = {
+            origin: units * share
+            for origin, units in self.origin_rounding.items()}
         self.origins = {origin: units * (1. - share)
                         for origin, units in self.origins.items() if share < 1}
+        self.origin_growth = {origin: units * (1. - share)
+                              for origin, units in self.origin_growth.items()
+                              if share < 1}
+        self.origin_rounding = {
+            origin: units * (1. - share)
+            for origin, units in self.origin_rounding.items() if share < 1}
         self.alpha = max(0., self.alpha - qty)
         self.known *= 1. - share
         self.cost *= 1. - share
         self.probable *= 1. - share
         self.estimated_cost *= 1. - share
+        self.growth *= 1. - share
+        self.known_growth *= 1. - share
+        self.probable_growth *= 1. - share
+        self.known_rounding *= 1. - share
+        self.probable_rounding *= 1. - share
         return portion
 
     def add(self, part):
@@ -273,11 +311,61 @@ class _Holding:
         self.cost += part.cost
         self.probable += part.probable
         self.estimated_cost += part.estimated_cost
+        self.growth += part.growth
+        self.known_growth += part.known_growth
+        self.probable_growth += part.probable_growth
+        self.known_rounding += part.known_rounding
+        self.probable_rounding += part.probable_rounding
         for key, qty in part.origins.items():
             self.origins[key] = self.origins.get(key, 0.) + qty
+        for key, qty in part.origin_growth.items():
+            self.origin_growth[key] = self.origin_growth.get(key, 0.) + qty
+        for key, qty in part.origin_rounding.items():
+            self.origin_rounding[key] = self.origin_rounding.get(key, 0.) + qty
         if len(self.origins) > 5:
             self.origins = dict(sorted(self.origins.items(),
                                        key=_origin_order)[:5])
+            self.origin_growth = {
+                key: qty for key, qty in self.origin_growth.items()
+                if key in self.origins}
+            self.origin_rounding = {
+                key: qty for key, qty in self.origin_rounding.items()
+                if key in self.origins}
+
+    def lose_rounding_units(self, qty):
+        """A verified native loss changes units, never acquisition cost."""
+        share = qty / self.alpha
+        self.known_rounding += (self.known - self.known_growth) * share
+        self.probable_rounding += (
+            self.probable - self.probable_growth) * share
+        for origin, purchased in self.origins.items():
+            lost = self.origin_rounding.get(origin, 0.)
+            self.origin_rounding[origin] = lost + (purchased - lost) * share
+        self.origin_growth = {key: qty * (1. - share)
+                              for key, qty in self.origin_growth.items()}
+        self.alpha -= qty
+        self.known *= 1. - share
+        self.probable *= 1. - share
+        self.growth *= 1. - share
+        self.known_growth *= 1. - share
+        self.probable_growth *= 1. - share
+
+    def grow(self, qty):
+        """Expand proven units without manufacturing a purchase or cost."""
+        delta = qty - self.alpha
+        known_delta = self.known / self.alpha * delta
+        probable_delta = self.probable / self.alpha * delta
+        self.known_growth += known_delta
+        self.probable_growth += probable_delta
+        self.known += known_delta
+        self.probable += probable_delta
+        for origin, purchased in self.origins.items():
+            earned = self.origin_growth.get(origin, 0.)
+            current = purchased + earned - self.origin_rounding.get(origin, 0.)
+            self.origin_growth[origin] = (
+                earned + current / self.alpha * delta)
+        self.growth += delta
+        self.alpha = qty
 
     def observe(self, qty):
         if qty < self.alpha:
@@ -288,21 +376,56 @@ class _Holding:
         self.probable += self.known
         self.estimated_cost += self.cost
         self.known = self.cost = 0.
+        self.probable_growth += self.known_growth
+        self.known_growth = 0.
+        self.probable_rounding += self.known_rounding
+        self.known_rounding = 0.
         origins = defaultdict(float)
+        earned = defaultdict(float)
+        rounded = defaultdict(float)
         for (purchase, _), qty in self.origins.items():
             origins[purchase, True] += qty
+        for (purchase, _), qty in self.origin_growth.items():
+            earned[purchase, True] += qty
+        for (purchase, _), qty in self.origin_rounding.items():
+            rounded[purchase, True] += qty
         self.origins = dict(origins)
+        self.origin_growth = dict(earned)
+        self.origin_rounding = dict(rounded)
+
+    def provenance_fields(self):
+        return dict(growth_alpha=self.growth,
+                    known_growth_alpha=self.known_growth,
+                    probable_growth_alpha=self.probable_growth,
+                    unknown_growth_alpha=max(
+                        0., self.growth - self.known_growth
+                        - self.probable_growth),
+                    known_purchased_alpha=(self.known - self.known_growth
+                                           + self.known_rounding),
+                    probable_purchased_alpha=(
+                        self.probable - self.probable_growth
+                        + self.probable_rounding),
+                    known_purchased_rounding_loss_alpha=self.known_rounding,
+                    probable_purchased_rounding_loss_alpha=(
+                        self.probable_rounding))
 
     def as_position(self, addr, netuid):
         priced = self.known + self.probable
-        price = None
+        purchased = (priced - self.known_growth - self.probable_growth
+                     + self.known_rounding + self.probable_rounding)
+        price = effective = None
         if priced and _fully_priced(self.alpha, priced):
-            price = round((self.cost + self.estimated_cost) / priced, 12)
+            effective = round((self.cost + self.estimated_cost) / priced, 12)
+            if purchased > 0:
+                price = round(
+                    (self.cost + self.estimated_cost) / purchased, 12)
         return dict(address=addr, netuid=netuid, alpha=self.alpha,
                     buy_price_tao=price, known_alpha=self.known,
+                    effective_cost_per_alpha_tao=effective,
                     known_cost_tao=self.cost, probable_alpha=self.probable,
                     probable_cost_tao=self.estimated_cost,
-                    unknown_alpha=max(0., self.alpha - priced))
+                    unknown_alpha=max(0., self.alpha - priced),
+                    **self.provenance_fields())
 
 
 def _opening_inventory(timeline):
@@ -333,6 +456,7 @@ def _opening_inventory(timeline):
             if (e["kind"] == "stake_reallocation" and src not in seen_all
                     and key not in seen_keys):
                 minimum[key] = min(minimum[key], net[key] - e["alpha"])
+                net[key] -= e.get("rounding_loss_alpha", 0.)
             if src == dst:
                 continue
             for addr, sign in ((src, -1), (dst, 1)):
@@ -355,7 +479,9 @@ def _fully_priced(alpha, known):
 def _sale_stats():
     return dict(wins=0, priced_sales=0, unpriced_sales=0, realized_tao=0.,
                 partial_sales=0, known_sale_proceeds_tao=0.,
-                known_sale_cost_tao=0., unresolved_sale_proceeds_tao=0.)
+                known_sale_cost_tao=0., unresolved_sale_proceeds_tao=0.,
+                known_sales=0, growth_sales=0, growth_proceeds_tao=0.,
+                known_growth_proceeds_tao=0.)
 
 
 def _record_sale(event, sold, totals):
@@ -366,14 +492,24 @@ def _record_sale(event, sold, totals):
     share = 1. if fully_priced else min(1., sold.known / sold.alpha)
     known_proceeds = proceeds * share
     pnl = known_proceeds - sold.cost if share else None
+    growth_proceeds = proceeds * min(1., sold.growth / sold.alpha)
+    known_growth_proceeds = proceeds * min(1., sold.known_growth / sold.alpha)
+    trading_pnl = (known_proceeds - known_growth_proceeds - sold.cost
+                   if share else None)
+    trading_eligible = fully_priced and not sold.growth
     unresolved = proceeds - known_proceeds
     totals["known_sale_proceeds_tao"] += known_proceeds
     totals["known_sale_cost_tao"] += sold.cost
     totals["unresolved_sale_proceeds_tao"] += unresolved
-    if fully_priced:
+    totals["known_sales"] += bool(share)
+    totals["growth_sales"] += bool(sold.growth)
+    totals["growth_proceeds_tao"] += growth_proceeds
+    totals["known_growth_proceeds_tao"] += known_growth_proceeds
+    if trading_eligible:
         totals["priced_sales"] += 1
         totals["realized_tao"] += pnl
         totals["wins"] += pnl > 1e-12
+    if fully_priced:
         status = "fully_priced"
     else:
         totals["unpriced_sales"] += 1
@@ -387,17 +523,26 @@ def _record_sale(event, sold, totals):
                 basis_status=status, known_alpha=sold.known,
                 known_proceeds_tao=known_proceeds, known_cost_tao=sold.cost,
                 known_realized_tao=pnl, probable_alpha=sold.probable,
+                known_trading_realized_tao=trading_pnl,
+                trading_eligible=trading_eligible,
+                growth_proceeds_tao=growth_proceeds,
+                known_growth_proceeds_tao=known_growth_proceeds,
                 probable_cost_tao=sold.estimated_cost,
                 unknown_alpha=max(0., sold.alpha - sold.known - sold.probable),
-                unresolved_proceeds_tao=unresolved)
+                unresolved_proceeds_tao=unresolved, **sold.provenance_fields())
 
 
 def _finish_sales(s):
-    has_cost = s["priced_sales"] or s["partial_sales"]
+    has_cost = s["known_sales"]
     pnl = s["known_sale_proceeds_tao"] - s["known_sale_cost_tao"]
     s["known_realized_tao"] = round(pnl, 9) if has_cost else None
+    s["known_trading_realized_tao"] = (
+        round(pnl - s["known_growth_proceeds_tao"], 9) if has_cost else None)
+    s["economic_realized_tao"] = (
+        None if s["unpriced_sales"] else s["known_realized_tao"])
     for key in ("realized_tao", "known_sale_proceeds_tao",
-                "known_sale_cost_tao", "unresolved_sale_proceeds_tao"):
+                "known_sale_cost_tao", "unresolved_sale_proceeds_tao",
+                "growth_proceeds_tao", "known_growth_proceeds_tao"):
         s[key] = round(s[key], 9)
 
 
@@ -413,7 +558,10 @@ def _transfer_receipt(e, part):
                     known_alpha=None, known_cost_tao=None,
                     known_buy_price_tao=None, probable_alpha=None,
                     probable_cost_tao=None, unknown_alpha=None,
-                    other_origin_alpha=None, other_origin_cost_tao=None)
+                    other_origin_alpha=None, other_origin_cost_tao=None,
+                    effective_cost_per_alpha_tao=None, growth_alpha=None,
+                    known_growth_alpha=None, probable_growth_alpha=None,
+                    unknown_growth_alpha=None)
     for (purchase, estimated), units in sorted(part.origins.items(),
                                                key=_origin_order):
         if units <= 0:
@@ -421,13 +569,22 @@ def _transfer_receipt(e, part):
         row["origins"].append(dict(
             address=purchase.address, time=purchase.time,
             event_id=purchase.event_id, extrinsic=purchase.extrinsic or None,
-            unit_buy_price_tao=purchase.unit_price, alpha=units,
+            unit_buy_price_tao=purchase.unit_price,
+            alpha=(units + part.origin_growth.get((purchase, estimated), 0.)
+                   - part.origin_rounding.get((purchase, estimated), 0.)),
+            purchased_alpha=units,
+            purchased_rounding_loss_alpha=part.origin_rounding.get(
+                (purchase, estimated), 0.),
+            growth_alpha=part.origin_growth.get((purchase, estimated), 0.),
             cost_tao=purchase.unit_price * units,
             basis_status="estimated" if estimated else "confirmed"))
     priced = part.known + part.probable
+    purchased = (priced - part.known_growth - part.probable_growth
+                 + part.known_rounding + part.probable_rounding)
     cost = part.cost + part.estimated_cost
-    if part.known:
-        entry = part.cost / part.known
+    if part.known > part.known_growth:
+        entry = part.cost / (
+            part.known - part.known_growth + part.known_rounding)
     side = e.get("transfer_side")
     if side == "unknown" or e["src"] == e["dst"]:
         status = "direction_unknown"
@@ -440,28 +597,115 @@ def _transfer_receipt(e, part):
     elif not _fully_priced(part.alpha, priced):
         status = "partial"
     else:
-        inherited = cost / priced
+        inherited = cost / purchased if purchased > 0 else None
         status = "estimated" if part.probable else "confirmed"
     sampled_qty = sum(o["alpha"] for o in row["origins"])
     sampled_cost = sum(o["cost_tao"] for o in row["origins"])
     return dict(
         row, basis_status=status, inherited_buy_price_tao=inherited,
+        effective_cost_per_alpha_tao=(
+            cost / priced if priced and _fully_priced(part.alpha, priced)
+            else None),
         known_alpha=part.known, known_cost_tao=part.cost,
         known_buy_price_tao=entry, probable_alpha=part.probable,
         probable_cost_tao=part.estimated_cost,
         unknown_alpha=max(0., part.alpha - priced),
         other_origin_alpha=max(0., priced - sampled_qty),
-        other_origin_cost_tao=max(0., cost - sampled_cost))
+        other_origin_cost_tao=max(0., cost - sampled_cost),
+        **part.provenance_fields())
+
+
+def _growth_inventory_matches(actual, expected):
+    # Chain stake quantities can differ by one nano-alpha through integer
+    # conversion. This is only an endpoint check, never a priced-sale rule.
+    return math.isclose(actual, expected, rel_tol=2e-15, abs_tol=1.1e-9)
+
+
+def _growth_timeline(growth_events, events, checkpoints):
+    """Normalize trusted proof intervals; never infer growth from a delta.
+
+    The caller must verify unchanged stake shares, compatible pool epochs,
+    complete movement coverage, and whole-wallet/subnet endpoint balances.
+    The ledger additionally rejects contradictory observed movements.
+    """
+    unique = {}
+    for proof in growth_events:
+        try:
+            start = _parse_ts(proof["start_time"])
+            end = _parse_ts(proof["time"])
+            before = float(proof["before_alpha"])
+            after = float(proof["after_alpha"])
+            valid = (proof["evidence"] == "verified_stake_growth"
+                     and proof["id"] and proof["address"]
+                     and isinstance(proof["netuid"], int)
+                     and start is not None and end is not None and start < end
+                     and math.isfinite(before) and math.isfinite(after)
+                     and 0 < before < after)
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Invalid verified stake growth proof") from exc
+        if not valid:
+            raise ValueError("Invalid verified stake growth proof")
+        normalized = dict(proof, before_alpha=before, after_alpha=after)
+        if proof["id"] in unique and unique[proof["id"]] != normalized:
+            raise ValueError("Conflicting stake growth proof ID")
+        unique[proof["id"]] = normalized
+    intervals = defaultdict(list)
+    timeline = []
+    dated = sorted(unique.values(), key=lambda p: _parse_ts(p["start_time"]))
+    for proof in dated:
+        start, end = _parse_ts(proof["start_time"]), _parse_ts(proof["time"])
+        key = proof["address"], proof["netuid"]
+        if intervals[key] and intervals[key][-1] > start:
+            raise ValueError("Overlapping stake growth proof intervals")
+        intervals[key].append(end)
+        for event in events:
+            if (event["netuid"] == key[1] and event.get("alpha")
+                    and key[0] in (event["src"], event["dst"])
+                    and start < _parse_ts(event["time"]) <= end):
+                raise ValueError(
+                    "Observed movement inside stake growth interval")
+        for checkpoint in checkpoints:
+            observed = _parse_ts(checkpoint["time"])
+            expected = (proof["after_alpha"] if observed == end
+                        else proof["before_alpha"])
+            if (checkpoint["address"] == key[0]
+                    and ("netuid_scope" not in checkpoint
+                         or key[1] in checkpoint["netuid_scope"])
+                    and start <= observed <= end
+                    and not _growth_inventory_matches(
+                        checkpoint["units"].get(key[1], 0.),
+                        expected)):
+                raise ValueError(
+                    "Stake growth inventory conflicts with dated snapshot")
+        anchor = dict(address=key[0], time=proof["start_time"],
+                      units={key[1]: proof["before_alpha"]},
+                      netuid_scope=[key[1]], growth_start=proof["id"])
+        earned = dict(proof, kind="stake_growth", src=None, dst=key[0],
+                      alpha=proof["after_alpha"] - proof["before_alpha"],
+                      tao=None)
+        timeline.extend([(start, True, anchor), (end, False, earned)])
+    return timeline
 
 
 def portfolio(events, checkpoints, *, subnet_stats=None, sale_details=None,
-              transfer_details=None):
+              transfer_details=None, growth_events=()):
     """Replay once; optionally write the per-wallet/subnet sale breakdown
     into the supplied mapping. A checkpoint with ``netuid_scope`` observes
-    only those assets; an omitted scope observes the complete account."""
+    only those assets; an omitted scope observes the complete account.
+
+    ``growth_events`` contains externally verified, dated stake-share growth
+    intervals with id, address, netuid, start_time, time, before_alpha,
+    after_alpha and evidence="verified_stake_growth". These are trusted
+    proofs, not guesses from snapshots. Growth retains acquisition cost and
+    source uncertainty; its proceeds are excluded from trading signals.
+    """
     events = sorted(events, key=_chain_order)
+    if any(e["kind"] == "stake_growth" for e in events):
+        raise ValueError("Stake growth requires verified growth_events input")
+    checkpoints = list(checkpoints)
     timeline = [(_parse_ts(e["time"]), False, e) for e in events]
     timeline.extend((_parse_ts(p["time"]), True, p) for p in checkpoints)
+    timeline.extend(_growth_timeline(growth_events, events, checkpoints))
     timeline.sort(key=lambda item: item[:2])
     lots = _opening_inventory(timeline)
     sales = defaultdict(_sale_stats)
@@ -475,6 +719,13 @@ def portfolio(events, checkpoints, *, subnet_stats=None, sale_details=None,
             nets = (set(e["netuid_scope"]) if "netuid_scope" in e else
                     set(e["units"]) | {n for a, n in lots if a == addr})
             for n in nets:
+                if e.get("growth_start"):
+                    if not _growth_inventory_matches(
+                            lots[addr, n].alpha, e["units"][n]):
+                        raise ValueError(
+                            "Stake growth start inventory conflicts "
+                            "with ledger")
+                    continue
                 lots[addr, n].observe(e["units"].get(n, 0))
             continue
         qty, n = e["alpha"], e["netuid"]
@@ -483,10 +734,23 @@ def portfolio(events, checkpoints, *, subnet_stats=None, sale_details=None,
                 transfer_details.append(_transfer_receipt(e, None))
             continue
         src, dst = _inventory_endpoints(e)
+        if e["kind"] == "stake_growth":
+            lot = lots[dst, n]
+            if (lot.alpha <= 0 or lot.alpha > e["after_alpha"]
+                    or not _growth_inventory_matches(
+                        lot.alpha, e["before_alpha"])):
+                raise ValueError(
+                    "Stake growth end inventory conflicts with ledger")
+            lot.grow(e["after_alpha"])
+            continue
         if e["kind"] == "stake_reallocation":
             lot = lots[src, n]
             lot.observe(max(lot.alpha, qty))
-            if e["evidence"] != "native_move":
+            if e["evidence"] == "native_move" and e.get("rounding_loss_alpha"):
+                part = lot.remove(qty)
+                part.lose_rounding_units(e["rounding_loss_alpha"])
+                lot.add(part)
+            elif e["evidence"] != "native_move":
                 # Both sides cancel economically, but this could be a real
                 # sale and re-entry. The old cost on these units is only
                 # an estimate until the native call resolves the ambiguity.

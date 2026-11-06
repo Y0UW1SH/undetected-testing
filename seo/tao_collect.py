@@ -150,7 +150,7 @@ def _receipt_order(events, missing, watched, limit=24):
     # cutoff even for two events in the same block or extrinsic.
     for index, e in enumerate(events):
         xid = e.get("extrinsic")
-        if e["kind"] == "stake_reallocation" and xid in missing:
+        if e["kind"] in ("stake_reallocation", "sell") and xid in missing:
             newest[xid] = index
             owners[xid] = e["src"]
             if (e.get("alpha") or 0.) <= 0:
@@ -225,8 +225,7 @@ def _read(store, session=None, explicit=()):
         requested.add(detail["extrinsic_id"])
         _cache_call(db, saved, detail)
     normalized = tao_ledger.net_transfers(events)
-    candidates = {e["extrinsic"] for e in normalized
-                  if e.get("evidence") == "matching_trade_legs"}
+    candidates = tao_ledger.matching_reallocation_ids(events)
     if session:
         watched = {r["address"] for r in store.followed()}
         missing = candidates - set(saved) - requested

@@ -1,4 +1,6 @@
 """Regressions for interpreting a wallet's observed, partial trade history."""
+import pytest
+
 from seo.tao_ledger import inferred_links, net_transfers, portfolio, timing
 
 
@@ -428,3 +430,317 @@ def test_timing_proof_retains_time_of_selected_quote():
     prices = [dict(netuid=8, fetched_at=mark, price_tao=2)]
     assert list(timing_observations([e], prices, with_timestamp=True)) == [
         (e, 2, mark)]
+
+
+def growth(start, end, address, before, after, **fields):
+    return dict(id=f"growth/{address}/{start}/{end}", address=address,
+                netuid=8, start_time=day(start), time=day(end),
+                before_alpha=before, after_alpha=after,
+                evidence="verified_stake_growth", **fields)
+
+
+def test_growth_keeps_purchase_cost_and_origins_through_partial_moves():
+    events = [event(1, "buy", None, "a", 100, 50, extrinsic="100-1"),
+              event(4, "stake_transfer", "a", "b", 60),
+              event(7, "stake_transfer", "b", "c", 33)]
+    growths = [growth(2, 3, "a", 100, 120),
+               growth(5, 6, "b", 60, 66)]
+    receipts = []
+    positions, _ = portfolio(events, [], growth_events=growths,
+                             transfer_details=receipts)
+    held = positions["c", 8]
+    assert held["alpha"] == held["known_alpha"] == 33
+    assert held["known_cost_tao"] == 12.5
+    assert held["growth_alpha"] == held["known_growth_alpha"] == 8
+    assert held["unknown_alpha"] == 0
+    assert held["buy_price_tao"] == 0.5
+    assert held["effective_cost_per_alpha_tao"] == pytest.approx(12.5 / 33)
+    receipt = receipts[-1]
+    assert receipt["inherited_buy_price_tao"] == 0.5
+    assert receipt["growth_alpha"] == 8
+    origin, = receipt["origins"]
+    assert origin["extrinsic"] == "100-1"
+    assert origin["unit_buy_price_tao"] == 0.5
+    assert origin["alpha"] == 33 and origin["purchased_alpha"] == 25
+    assert origin["growth_alpha"] == 8 and origin["cost_tao"] == 12.5
+
+
+def test_growth_sale_separates_economic_return_from_trading_signal():
+    events = [event(1, "buy", None, "a", 100, 100),
+              event(4, "sell", "a", None, 100, 100)]
+    details, subnet = [], {}
+    positions, stats = portfolio(
+        events, [], growth_events=[growth(2, 3, "a", 100, 200)],
+        sale_details=details, subnet_stats=subnet)
+    sale, = details
+    assert sale["basis_status"] == "fully_priced"
+    assert sale["known_cost_tao"] == 50
+    assert sale["known_realized_tao"] == 50
+    assert sale["known_trading_realized_tao"] == 0
+    assert sale["growth_proceeds_tao"] == 50
+    assert sale["known_growth_proceeds_tao"] == 50
+    assert sale["trading_eligible"] is False
+    assert positions["a", 8]["known_cost_tao"] == 50
+    assert positions["a", 8]["known_growth_alpha"] == 50
+    assert stats["a"] == subnet["a", 8]
+    assert stats["a"]["known_realized_tao"] == 50
+    assert stats["a"]["known_trading_realized_tao"] == 0
+    assert stats["a"]["growth_sales"] == 1
+    assert stats["a"]["wins"] == stats["a"]["priced_sales"] == 0
+    assert stats["a"]["unpriced_sales"] == stats["a"]["realized_tao"] == 0
+
+
+def test_growth_preserves_unknown_and_probable_coverage_without_zero_cost():
+    events = [event(1, "buy", None, "source", 10, 20),
+              event(2, "stake_transfer", "source", "a", 10)]
+    events[1]["evidence"] = "snapshot_match"
+    events += [event(3, "buy", None, "a", 10, 30),
+               event(4, "stake_transfer", None, "a", 10),
+               event(7, "stake_transfer", "a", "b", 30),
+               event(8, "sell", "b", None, 15, 45)]
+    details = []
+    positions, stats = portfolio(
+        events, [], growth_events=[growth(5, 6, "a", 30, 60)],
+        sale_details=details)
+    held = positions["b", 8]
+    assert held["alpha"] == 15
+    assert held["known_alpha"] == held["probable_alpha"] == 5
+    assert held["unknown_alpha"] == 5
+    assert held["known_growth_alpha"] == held["probable_growth_alpha"] == 2.5
+    assert held["unknown_growth_alpha"] == 2.5
+    assert held["known_cost_tao"] == 7.5 and held["probable_cost_tao"] == 5
+    assert held["buy_price_tao"] is None
+    sale, = details
+    assert sale["known_realized_tao"] == 7.5
+    assert sale["known_trading_realized_tao"] == 0
+    assert sale["growth_proceeds_tao"] == 22.5
+    assert sale["known_growth_proceeds_tao"] == 7.5
+    assert sale["unresolved_proceeds_tao"] == 30
+    assert stats["b"]["wins"] == 0 and stats["b"]["unpriced_sales"] == 1
+
+
+def test_dated_growth_does_not_seed_future_earned_units_as_opening_inventory():
+    events = [event(1, "buy", None, "a", 100, 50),
+              event(4, "sell", "a", None, 60, 60)]
+    snapshots = [checkpoint(5, "a", 60)]
+    details = []
+    positions, stats = portfolio(
+        events, snapshots, growth_events=[growth(2, 3, "a", 100, 120)],
+        sale_details=details)
+    assert details[0]["known_alpha"] == 60
+    assert details[0]["known_cost_tao"] == 25
+    assert positions["a", 8]["unknown_alpha"] == 0
+    assert stats["a"]["known_trading_realized_tao"] == 25
+    unknown, unknown_stats = portfolio(
+        [event(4, "sell", "x", None, 10, 20)], [],
+        growth_events=[growth(2, 3, "x", 10, 20)])
+    assert unknown["x", 8]["unknown_alpha"] == 10
+    assert unknown["x", 8]["unknown_growth_alpha"] == 5
+    assert unknown_stats["x"]["known_realized_tao"] is None
+    assert unknown_stats["x"]["known_trading_realized_tao"] is None
+
+
+def test_growth_rejects_intervening_movements_and_conflicting_inventory():
+    buy = event(1, "buy", None, "a", 100, 50)
+    proof = growth(2, 4, "a", 100, 120)
+    for movement in [event(3, "sell", "a", None, 10, 10),
+                     event(3, "stake_transfer", "a", "b", 10),
+                     event(4, "buy", None, "a", 10, 10),
+                     event(3, "stake_reallocation", "a", "a", 100)]:
+        with pytest.raises(ValueError, match="movement"):
+            portfolio([buy, movement], [], growth_events=[proof])
+    with pytest.raises(ValueError, match="inventory"):
+        portfolio([buy], [dict(checkpoint(1, "a", 0), netuid_scope=[8],
+                               time=day(1).replace("00:00:00", "00:00:01"))],
+                  growth_events=[proof])
+
+
+def test_growth_rejects_invalid_proofs_and_deduplicates_repeated_import():
+    buy = event(1, "buy", None, "a", 100, 50)
+    proof = growth(2, 3, "a", 100, 120)
+    for fields in [dict(evidence="snapshot_match"), dict(before_alpha=0),
+                   dict(after_alpha=float("nan")), dict(after_alpha=90),
+                   dict(start_time=day(3)), dict(time=day(1))]:
+        with pytest.raises(ValueError):
+            portfolio([buy], [], growth_events=[dict(proof, **fields)])
+    with pytest.raises(ValueError, match="(?i)overlap"):
+        portfolio([buy], [], growth_events=[
+            proof, growth(2, 4, "a", 100, 130)])
+    with pytest.raises(ValueError, match="(?i)conflict"):
+        portfolio([buy], [], growth_events=[
+            proof, dict(proof, after_alpha=130)])
+    positions, _ = portfolio([buy], [], growth_events=[proof, proof])
+    assert positions["a", 8]["alpha"] == 120
+
+
+def test_growth_does_not_override_a_contradictory_dated_inventory():
+    buy = event(1, "buy", None, "a", 100, 50)
+    proof = growth(2, 4, "a", 100, 120)
+    for snapshot in [checkpoint(3, "a", 110), checkpoint(4, "a", 130)]:
+        with pytest.raises(ValueError, match="inventory"):
+            portfolio([buy], [snapshot], growth_events=[proof])
+
+
+def test_growth_receipt_keeps_estimated_origins_and_unsampled_purchase_cost():
+    buys = [event(i, "buy", None, "a", 10, i, extrinsic=f"{i}-1")
+            for i in range(1, 8)]
+    move = dict(event(10, "stake_transfer", "a", "b", 140),
+                evidence="snapshot_match")
+    receipts = []
+    positions, _ = portfolio(buys + [move], [],
+                             growth_events=[growth(8, 9, "a", 70, 140)],
+                             transfer_details=receipts)
+    held = positions["b", 8]
+    assert held["known_alpha"] == held["known_growth_alpha"] == 0
+    assert held["probable_alpha"] == 140
+    assert held["probable_growth_alpha"] == 70
+    assert held["probable_cost_tao"] == 28 and held["buy_price_tao"] == 0.4
+    receipt, = receipts
+    assert receipt["basis_status"] == "estimated"
+    assert receipt["other_origin_alpha"] == 40
+    assert receipt["other_origin_cost_tao"] == 13
+    assert len(receipt["origins"]) == 5
+    assert sum(o["cost_tao"] for o in receipt["origins"]) == 15
+    assert all(o["purchased_alpha"] == o["growth_alpha"] == 10
+               and o["basis_status"] == "estimated"
+               for o in receipt["origins"])
+
+
+def test_growth_start_follows_same_timestamp_purchase_and_growth_end():
+    buy = event(1, "buy", None, "a", 100, 50)
+    proofs = [growth(1, 2, "a", 100, 120), growth(2, 3, "a", 120, 144)]
+    positions, _ = portfolio([buy], [], growth_events=proofs[::-1])
+    held = positions["a", 8]
+    assert held["alpha"] == held["known_alpha"] == 144
+    assert held["known_cost_tao"] == 50 and held["known_growth_alpha"] == 44
+    assert held["buy_price_tao"] == 0.5 and held["unknown_alpha"] == 0
+
+
+def test_one_nano_rounding_preserves_cost_without_hiding_unknown_units():
+    events = [event(1, "buy", None, "a", 10, 5),
+              event(3, "stake_transfer", "a", "b", 12.000000001)]
+    proofs = [growth(1, 2, "a", 10, 12),
+              growth(3, 4, "b", 12, 13.2)]
+    positions, _ = portfolio(events, [], growth_events=proofs)
+    held = positions["b", 8]
+    assert held["known_cost_tao"] == 5
+    assert held["unknown_alpha"] == pytest.approx(1.1e-9, abs=1e-14)
+    assert held["buy_price_tao"] is None
+    assert held["known_growth_alpha"] == pytest.approx(3.2, abs=2e-9)
+
+
+def test_growth_cannot_be_injected_as_unvalidated_ordinary_event():
+    injected = dict(event(2, "stake_growth", None, "a", 20),
+                    before_alpha=100, after_alpha=120)
+    with pytest.raises(ValueError, match="growth_events"):
+        portfolio([event(1, "buy", None, "a", 100, 50), injected], [])
+
+
+def test_growth_tolerance_rejects_zero_balance_or_negative_delta():
+    with pytest.raises(ValueError, match="inventory"):
+        portfolio([], [checkpoint(1, "a", 0)],
+                  growth_events=[growth(2, 3, "a", 1e-10, 2e-10)])
+    with pytest.raises(ValueError, match="inventory"):
+        portfolio([event(1, "buy", None, "a", 100.000000001, 50)], [],
+                  growth_events=[growth(2, 3, "a", 100, 100.0000000005)])
+
+
+def test_lossy_reallocation_is_only_a_candidate_until_native_verification():
+    from seo.tao_ledger import matching_reallocation_ids
+    debit = event(2, "sell", "a", None, 10, 5, id="debit",
+                  extrinsic="200-1", event_index=1)
+    credit = event(2, "buy", None, "a", 9.999999999, 5, id="credit",
+                   extrinsic="200-1", event_index=2)
+    assert matching_reallocation_ids([debit, credit]) == {"200-1"}
+    assert [row["kind"] for row in net_transfers([debit, credit])] == [
+        "sell", "buy"]
+    for alpha in (9.999999998, 10.000000001):
+        assert matching_reallocation_ids([
+            debit, dict(credit, alpha=alpha)]) == set()
+
+
+def test_verified_rounding_keeps_cost_and_original_price_through_transfer():
+    original = event(1, "buy", None, "a", 10, 5, extrinsic="100-1")
+    debit = event(2, "sell", "a", None, 10, 7, id="debit",
+                  extrinsic="200-1", event_index=1)
+    credit = event(2, "buy", None, "a", 9.999999999, 7, id="credit",
+                   extrinsic="200-1", event_index=2)
+    moved = event(3, "stake_transfer", "a", "b", 9.999999999)
+    events = net_transfers([original, debit, credit, moved],
+                           verified_moves={"200-1"})
+    reallocation = events[1]
+    assert reallocation["kind"] == "stake_reallocation"
+    assert reallocation["received_alpha"] == 9.999999999
+    assert reallocation["rounding_loss_alpha"] == pytest.approx(1e-9)
+    receipts = []
+    positions, stats = portfolio(events, [], transfer_details=receipts)
+    held = positions["b", 8]
+    assert held["alpha"] == held["known_alpha"] == 9.999999999
+    assert held["known_cost_tao"] == 5 and held["buy_price_tao"] == 0.5
+    assert held["unknown_alpha"] == 0 and not stats
+    receipt, = receipts
+    assert receipt["inherited_buy_price_tao"] == 0.5
+    origin, = receipt["origins"]
+    assert origin["purchased_alpha"] == 10 and origin["cost_tao"] == 5
+    assert origin["alpha"] == 9.999999999
+    assert origin["purchased_rounding_loss_alpha"] == pytest.approx(1e-9)
+    positions, stats = portfolio(events + [
+        event(4, "sell", "b", None, 4.9999999995, 2.5)], [])
+    assert positions["b", 8]["known_cost_tao"] == 2.5
+    assert positions["b", 8]["known_purchased_alpha"] == 5
+    assert positions["b", 8]["buy_price_tao"] == 0.5
+    assert stats["b"]["known_realized_tao"] == 0
+
+
+def test_verified_rounding_loss_of_grown_stake_keeps_paid_units_distinct():
+    debit = event(4, "sell", "a", None, 100, 100, id="debit",
+                  extrinsic="400-1", event_index=1)
+    credit = event(4, "buy", None, "a", 99.999999999, 100, id="credit",
+                   extrinsic="400-1", event_index=2)
+    events = net_transfers(
+        [event(1, "buy", None, "a", 100, 50), debit, credit],
+        verified_moves={"400-1"})
+    positions, _ = portfolio(events, [],
+                             growth_events=[growth(2, 3, "a", 100, 200)])
+    held = positions["a", 8]
+    assert held["alpha"] == pytest.approx(199.999999999, abs=1e-13)
+    assert held["known_cost_tao"] == 50 and held["buy_price_tao"] == 0.5
+    assert held["known_growth_alpha"] == pytest.approx(
+        99.9999999995, abs=1e-13)
+    assert held["known_purchased_alpha"] == 100
+    assert held["unknown_alpha"] == 0
+
+
+def test_growth_rejects_interior_inventory_changes_even_if_later_restored():
+    buy = event(1, "buy", None, "a", 100, 50)
+    proof = growth(2, 5, "a", 100, 120)
+    for amount in (90, 110):
+        snapshots = [checkpoint(3, "a", amount), checkpoint(4, "a", 100)]
+        with pytest.raises(ValueError, match="inventory"):
+            portfolio([buy], snapshots, growth_events=[proof])
+
+
+def test_native_rounding_then_growth_and_estimated_move_retains_origins():
+    debit = event(2, "sell", "a", None, 10, 7, id="debit",
+                  extrinsic="200-1", event_index=1)
+    credit = event(2, "buy", None, "a", 9.999999999, 7, id="credit",
+                   extrinsic="200-1", event_index=2)
+    move = dict(event(5, "stake_transfer", "a", "b", 19.999999998),
+                evidence="snapshot_match")
+    events = net_transfers(
+        [event(1, "buy", None, "a", 10, 5), debit, credit, move],
+        verified_moves={"200-1"})
+    receipts = []
+    positions, _ = portfolio(
+        events, [], transfer_details=receipts,
+        growth_events=[growth(3, 4, "a", 9.999999999, 19.999999998)])
+    held = positions["b", 8]
+    assert held["probable_cost_tao"] == 5 and held["buy_price_tao"] == 0.5
+    assert held["probable_purchased_alpha"] == 10
+    assert held["probable_growth_alpha"] == 9.999999999
+    assert held["known_alpha"] == held["known_purchased_alpha"] == 0
+    origin, = receipts[0]["origins"]
+    assert origin["purchased_alpha"] == 10
+    assert origin["growth_alpha"] == 9.999999999
+    assert origin["cost_tao"] == 5 and origin["basis_status"] == "estimated"
+    assert origin["alpha"] == pytest.approx(19.999999998, abs=1e-13)

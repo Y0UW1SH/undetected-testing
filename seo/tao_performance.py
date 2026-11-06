@@ -60,6 +60,9 @@ def _marked_position(address, netuid, pos, sales, quote, stamp, inventory_ok):
                    unknown_alpha=0., buy_price_tao=None)
     qty = pos["alpha"]
     known, estimated = pos["known_alpha"], pos["probable_alpha"]
+    growth = pos.get("growth_alpha", 0.)
+    known_growth = pos.get("known_growth_alpha", 0.)
+    estimated_growth = pos.get("probable_growth_alpha", 0.)
     price = quote.get("price_tao")
     fresh = price is not None and _parse_ts(quote["fetched_at"]) == stamp
     can_mark = fresh and inventory_ok
@@ -68,17 +71,35 @@ def _marked_position(address, netuid, pos, sales, quote, stamp, inventory_ok):
                  if can_mark and known else None)
     estimated_pnl = (price * estimated - pos["probable_cost_tao"]
                      if can_mark and estimated else None)
+    growth_value = price * growth if can_mark else None
+    known_growth_value = price * known_growth if can_mark and known else None
+    estimated_growth_value = (price * estimated_growth
+                              if can_mark and estimated else None)
+    known_trading = (known_pnl - known_growth_value
+                     if known_pnl is not None else None)
+    estimated_trading = (estimated_pnl - estimated_growth_value
+                         if estimated_pnl is not None else None)
     all_known = math.isclose(known, qty, abs_tol=1e-13, rel_tol=2e-15)
-    known_entry = pos["known_cost_tao"] / known if known else None
+    purchased = pos.get("known_purchased_alpha", known - known_growth)
+    known_entry = pos["known_cost_tao"] / purchased if purchased > 0 else None
+    known_effective = pos["known_cost_tao"] / known if known else None
     total_pnl = known_pnl if all_known else None
+    trading_pnl = known_trading if all_known else None
     if not qty and inventory_ok:
-        total_pnl = value = 0.
+        total_pnl = trading_pnl = value = growth_value = 0.
     return dict(pos, **sales, quote_at=quote.get("fetched_at"),
                 price_tao=price, current_quote=fresh,
                 current_inventory=inventory_ok,
                 known_buy_price_tao=known_entry, marked_value_tao=value,
+                known_effective_cost_per_alpha_tao=known_effective,
+                growth_value_tao=growth_value,
+                known_growth_value_tao=known_growth_value,
+                probable_growth_value_tao=estimated_growth_value,
                 known_unrealized_tao=known_pnl,
                 probable_unrealized_tao=estimated_pnl,
+                known_trading_unrealized_tao=known_trading,
+                probable_trading_unrealized_tao=estimated_trading,
+                gross_trading_unrealized_tao=trading_pnl,
                 gross_unrealized_tao=total_pnl)
 
 
@@ -138,11 +159,13 @@ def _open_evidence(w, additions, stamp):
     known = [p for p in positions if p["known_alpha"] > 0]
     marked = w["marked_value_tao"]
     cost = sum(p["known_cost_tao"] for p in known) if known else None
-    confirmed = None
+    confirmed = growth_value = trading_pnl = None
     share = None
     if w["current_inventory"] and marked and known:
         # marked_value_tao requires a fresh quote on every held subnet.
         confirmed = sum(p["known_unrealized_tao"] for p in known)
+        growth_value = sum(p["known_growth_value_tao"] for p in known)
+        trading_pnl = sum(p["known_trading_unrealized_tao"] for p in known)
         share = min(1., sum(p["known_alpha"] * p["price_tao"]
                             for p in known) / marked)
     known_return = (100 * confirmed / cost
@@ -152,6 +175,8 @@ def _open_evidence(w, additions, stamp):
     elapsed = (stamp - _parse_ts(last)).total_seconds() if last else None
     return dict(positions=len(positions), confirmed_positions=len(known),
                 known_cost_tao=cost, known_pnl_tao=confirmed,
+                known_growth_value_tao=growth_value,
+                known_trading_pnl_tao=trading_pnl,
                 known_value_fraction=share, known_return_pct=known_return,
                 return_pct=(known_return if w["gross_unrealized_tao"]
                             is not None else None),
@@ -204,7 +229,8 @@ def _eligibility(w, stamp, settings):
     proceeds = known_proceeds + (w.get("unresolved_sale_proceeds_tao") or 0.)
     w["known_sale_value_fraction"] = (known_proceeds / proceeds
                                       if proceeds else None)
-    known_pnl = w.get("known_realized_tao")
+    known_pnl = w.get("known_trading_realized_tao",
+                      w.get("known_realized_tao"))
     known_cost = w.get("known_sale_cost_tao")
     w["known_sale_return_pct"] = (100 * known_pnl / known_cost
                                   if known_pnl is not None and known_cost
@@ -301,6 +327,16 @@ def _whole_wallet(positions, field, inventory_ok):
     return sum(p[field] for p in positions)
 
 
+def economic_realized(row):
+    """Include growth in sale P/L; missing acquisition cost stays unknown."""
+    if row["unpriced_sales"]:
+        return None
+    for field in ("economic_realized_tao", "known_realized_tao"):
+        if row.get(field) is not None:
+            return row[field]
+    return row["realized_tao"]  # Older runs and wallets with no sales.
+
+
 def record_run(store, stamp, positions, stats, subnet_stats, events, prices,
                coverage, *, min_sales=2, min_timing=3, move_pct=5.0,
                max_balance_tao=100000.0, max_activity_24h=100):
@@ -351,11 +387,12 @@ def record_run(store, stamp, positions, stats, subnet_stats, events, prices,
         sales = totals["priced_sales"]
         fresh = address in inventory
         unrealized = _whole_wallet(rows, "gross_unrealized_tao", fresh)
+        economic = economic_realized(totals)
         combined = None
         account_coverage = coverage.get(address, {})
         if (unrealized is not None and not totals["unpriced_sales"]
                 and account_coverage.get("transactions") == "complete"):
-            combined = totals["realized_tao"] + unrealized
+            combined = economic + unrealized
         w = dict(address=address, **totals, positions=rows,
                  win_rate=totals["wins"] / sales if sales else None,
                  balance_tao=bal.get("balance_total"),
@@ -365,9 +402,14 @@ def record_run(store, stamp, positions, stats, subnet_stats, events, prices,
                  marked_value_tao=_whole_wallet(
                      rows, "marked_value_tao", fresh),
                  gross_unrealized_tao=unrealized, gross_total_pnl_tao=combined,
+                 gross_trading_unrealized_tao=_whole_wallet(
+                     rows, "gross_trading_unrealized_tao", fresh),
+                 growth_value_tao=_whole_wallet(
+                     rows, "growth_value_tao", fresh),
                  coverage=account_coverage, timing=sides,
                  transfer_links=ties[address], activity_24h=activity[address],
                  ranks=dict.fromkeys(BOARDS))
+        w["economic_realized_tao"] = economic
         w["open"] = _open_evidence(w, additions, end)
         _eligibility(w, end, settings)
         wallets.append(w)

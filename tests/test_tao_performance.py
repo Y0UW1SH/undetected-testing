@@ -6,7 +6,7 @@ from tests.test_tao_ledger import day, event
 
 
 def record(tmp_path, events, prices, stamp, coverage, *, snapshot_at=None,
-           **options):
+           growth_events=(), **options):
     from seo import tao_performance as perf
 
     store = storage.Storage(str(tmp_path / "wallets.sqlite"))
@@ -15,7 +15,8 @@ def record(tmp_path, events, prices, stamp, coverage, *, snapshot_at=None,
                 for a, c in coverage.items() if c["account"] == "complete"],
                stamp=stamp)
     subnets = {}
-    positions, totals = portfolio(events, [], subnet_stats=subnets)
+    positions, totals = portfolio(events, [], subnet_stats=subnets,
+                                  growth_events=growth_events)
     report = perf.record_run(store, stamp, positions, totals, subnets,
                              events, prices, coverage, **options)
     store.close()

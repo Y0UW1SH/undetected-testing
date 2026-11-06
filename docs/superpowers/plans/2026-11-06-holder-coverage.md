@@ -26,9 +26,26 @@ inventory anchors, preventing later balance differences from being invented as
 earlier holdings. Scoped anchors do not erase other assets or imply transfers.
 
 Another transfer intermediary's unchanged shares grew from 33,213 to
-35,929.888943380 alpha before onward transfer. Dated stake-growth accounting is
-still outstanding; do not label every remaining difference an undiscovered buy
-or insert zero-cost purchases. Local audit artifacts retain the raw evidence.
+35,929.888943380 alpha before onward transfer. Dated stake-growth accounting
+now preserves original monetary cost and purchase prices through transfers.
+It separates growth proceeds/value from trading gains. Native whole-subnet
+inventory and complete indexed movement history are required for the supported
+growth proof; conflicting intermediate snapshots require splitting intervals.
+Unclassified differences remain unresolved, never zero-cost purchases.
+
+The local AlphaV2 scanner now validates raw storage keys, share epochs, pinned
+block pagination, and atomic checkpoints. It adds distinct coldkey/subnet
+candidates to the shared holder research queue without pretending shares are
+balances. Legacy Alpha rows are explicitly outside this first scanner's scope.
+A bounded live scan read 5,120 rows and found 3,799 distinct candidates. These
+are unassessed candidates, not profit-ranked wallets. History-only batches can
+use explicit addresses on GitHub; native discovery and credentials stay local.
+
+Offline native replay writes a separate database and report, preserving source
+artifact event membership, account observation batches and quote timestamps.
+Review caught and fixed source-cutoff errors, interior snapshot cost erosion,
+and verified native one-nano rounding moves falsely treated as trades.
+Application validation: 398 tests passed; flake8 clean.
 
 ## Constraints
 

@@ -102,3 +102,23 @@ def test_unsuccessful_explicit_attempt_does_not_spend_another_auto_slot(
         tao_collect._read(store, object(), explicit=explicit)
     assert len(seen) == len(set(seen)) == 24
     assert seen[0] == "38-0001" and "39-0001" not in seen
+
+
+def test_native_rounding_move_is_verified_before_collapsing():
+    sell, buy = pair(30, 'holder')
+    buy['alpha'] = sell['alpha'] - 1e-9
+    proof = dict(extrinsic_id=sell['extrinsic'],
+                 call='SubtensorModule.move_stake',
+                 status='observed', success=True, signer='holder',
+                 call_args=dict(origin_netuid=sell['netuid'],
+                                destination_netuid=sell['netuid'],
+                                alpha_amount=round(sell['alpha'] * 1e9)))
+    with closing(sqlite3.connect(':memory:')) as db:
+        store = SimpleNamespace(conn=db, followed=lambda: [])
+        tao_collect._schema(db)
+        tao_collect._save_events(db, [sell, buy])
+        events, _ = tao_collect._read(store, explicit=[proof])
+    assert len(events) == 1
+    assert events[0]['kind'] == 'stake_reallocation'
+    assert events[0]['evidence'] == 'native_move'
+    assert events[0]['received_alpha'] == buy['alpha']
