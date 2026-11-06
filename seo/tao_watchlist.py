@@ -19,6 +19,8 @@ from seo.tao_directory_view import _cached, _research
 
 PREFS = Path("try_tao_out/local_watchlist.sqlite")
 ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+MAX_GROUP_MEMBERS = 50
+MAX_GROUP_SUBSET = 24
 
 
 def valid_address(s):
@@ -81,6 +83,53 @@ def apply(path, reasons):
     return result
 
 
+def save_group(path, members):
+    """Watch one server-resolved group in a transaction, retaining mutes."""
+    if (not isinstance(members, list)
+            or not 1 <= len(members) <= MAX_GROUP_MEMBERS
+            or not all(valid_address(a) for a in members)
+            or len(set(members)) != len(members)):
+        raise ValueError("This group cannot be saved in one action. "
+                         "Review its wallets individually (maximum 50).")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    result = dict(watched=[], muted=[])
+    with closing(sqlite3.connect(path, timeout=5)) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute("CREATE TABLE IF NOT EXISTS local_choices (address TEXT "
+                   "PRIMARY KEY,choice TEXT,label TEXT,note TEXT)")
+        for address in members:
+            row = db.execute("SELECT choice FROM local_choices WHERE "
+                             "address=?", (address,)).fetchone()
+            if row and row[0] == "mute":
+                result["muted"].append(address)
+                continue
+            if row:
+                db.execute("UPDATE local_choices SET choice='watch' "
+                           "WHERE address=?", (address,))
+            else:
+                db.execute("INSERT INTO local_choices VALUES(?,?,?,?)",
+                           (address, "watch", "", ""))
+            result["watched"].append(address)
+    return result
+
+
+@lru_cache(maxsize=2)
+def _group_files(cache, files):
+    from seo.tao_wallet_groups import build_groups
+    reports = []
+    for path, _, _ in files:
+        try:
+            with path.open(encoding="utf8") as source:
+                report = json.load(source)
+            if isinstance(report, dict):
+                relative = path.relative_to(cache.resolve())
+                report["_source"] = relative.as_posix()
+                reports.append(report)
+        except (OSError, ValueError):
+            continue
+    return build_groups(reports)
+
+
 @lru_cache(maxsize=2)
 def _research_files(cache, files):
     from seo.tao_local_watch import _cached_discovery, _selection
@@ -101,11 +150,46 @@ class Model:
         self.db = self.cache / "taostats-directory.sqlite"
         self.prefs = root / PREFS
 
-    def _base(self):
+    def _files(self):
         paths = _cached(self.cache)
-        files = tuple(sorted((p, p.stat().st_mtime_ns, p.stat().st_size)
-                             for p in paths))
-        return (*_research_files(self.cache, files), preferences(self.prefs))
+        return tuple(sorted((p, p.stat().st_mtime_ns, p.stat().st_size)
+                            for p in paths))
+
+    def _base(self):
+        return (*_research_files(self.cache, self._files()),
+                preferences(self.prefs))
+
+    def groups(self):
+        return _group_files(self.cache, self._files())
+
+    def watch_group(self, item):
+        if (not isinstance(item, dict)
+                or set(item) not in ({"group_id"}, {"group_id", "members"})
+                or not isinstance(item["group_id"], str)
+                or not re.fullmatch(r"group-[0-9a-f]{16}", item["group_id"])):
+            raise ValueError("Select a group from the local research.")
+        group = next((g for g in self.groups()["groups"]
+                      if g["id"] == item["group_id"]), None)
+        if group is None:
+            raise ValueError("This group is no longer available. "
+                             "Refresh and review the current groups.")
+        broad = (group.get("watchable") is False
+                 or group.get("oversized") is True)
+        if "members" in item:
+            members = item["members"]
+            limit = MAX_GROUP_SUBSET if broad else MAX_GROUP_MEMBERS
+            if (not isinstance(members, list)
+                    or not 1 <= len(members) <= limit
+                    or not all(isinstance(a, str) for a in members)
+                    or len(set(members)) != len(members)
+                    or not set(members).issubset(group["members"])):
+                raise ValueError("Choose up to %d distinct wallets from "
+                                 "this group's member list." % limit)
+            return save_group(self.prefs, members)
+        if broad:
+            raise ValueError("This group is too broad to watch in one action. "
+                             "Select up to 24 members to watch together.")
+        return save_group(self.prefs, group["members"])
 
     @staticmethod
     def _wallet(a, wallets, reasons, prefs):
@@ -127,6 +211,7 @@ class Model:
                     subnets=w.get("subnets", []),
                     positions=w.get("held", []),
                     current_inventory=w.get("current_inventory", False),
+                    accounting_source=w.get("accounting_source"),
                     balance_tao=w.get("balance_tao"),
                     balance_fetched_at=w.get("balance_fetched_at"),
                     timing=w.get("timing", {}),
@@ -198,10 +283,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, _instance(model.root))
             if url.path == "/api/watchlist":
                 return self.reply(200, model.data())
+            if url.path == "/api/groups":
+                return self.reply(200, model.groups())
             if url.path == "/api/search":
                 q = parse_qs(url.query).get("q", [""])[0].strip()
                 return self.reply(200, dict(wallets=model.search(q)))
             if (url.path in ("/accounts.html", "/wallets.html",
+                             "/native-holders.html", "/wallets-native.html",
                              "/network.html") or re.fullmatch(
                     r"/[0-9]{1,20}/(?:wallets|accounts)\.html", url.path)):
                 # Archived reports use paths relative to their run folder.
@@ -222,7 +310,7 @@ class Handler(BaseHTTPRequestHandler):
         origin = "http://" + self.server.authority
         if not self._local() or self.headers.get("Origin") != origin:
             return self.reply(403, {"error": "Save from the local editor."})
-        if self.path != "/api/watchlist":
+        if self.path not in ("/api/watchlist", "/api/groups/watch"):
             return self.reply(404, {"error": "Unknown operation."})
         token = self.headers.get("X-Watchlist-Token", "")
         if not secrets.compare_digest(token.encode(),
@@ -234,6 +322,9 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < size <= 16384 or kind != "application/json":
                 raise ValueError("Send a watchlist entry as JSON.")
             item = json.loads(self.rfile.read(size).decode("utf8"))
+            if self.path == "/api/groups/watch":
+                result = self.server.model.watch_group(item)
+                return self.reply(200, dict(ok=True, **result))
             save(self.server.model.prefs, item)
             return self.reply(200, {"ok": True})
         except ValueError as exc:

@@ -1,9 +1,56 @@
 import json
+import hashlib
 import sqlite3
 from contextlib import closing
 
 from seo import tao_directory_view as viewer
 from seo.sources import tao_census
+
+
+def test_local_replay_requires_source_hash_and_never_overrides_newer(tmp_path):
+    stamp = '2026-11-06T00:00:00Z'
+    base = dict(checked_at=stamp, coverage={'A': {'account': 'complete'}},
+                performance={'wallets': [dict(address='A',
+                                              known_realized_tao=5)]})
+    source = tmp_path / '123/report/tao_collect.json'
+    source.parent.mkdir(parents=True)
+    source.write_text(json.dumps(base))
+    replay = tmp_path / 'local-native/tao_collect.json'
+    replay.parent.mkdir()
+    corrected = dict(base, local_evidence=dict(
+        source_snapshot=stamp,
+        source_report_sha256=hashlib.sha256(source.read_bytes()).hexdigest()),
+        performance={'wallets': [dict(address='A', known_realized_tao=8)]})
+    replay.write_text(json.dumps(corrected))
+    paths = viewer._cached(tmp_path)
+    assert replay.resolve() in paths
+    wallets, stamps = viewer._research([], paths)
+    assert wallets['A']['known_realized'] == 8
+    assert wallets['A']['accounting_source'] == 'native_replay'
+    assert stamps == [stamp]
+    newer = tmp_path / '124/report/tao_collect.json'
+    newer.parent.mkdir(parents=True)
+    newer.write_text(json.dumps(dict(base, checked_at='2026-11-07T00:00:00Z')))
+    wallets, _ = viewer._research([], viewer._cached(tmp_path))
+    assert wallets['A']['known_realized'] == 5
+    source.write_text(json.dumps(dict(base, mode='changed-source')))
+    assert replay.resolve() not in viewer._cached(tmp_path)
+
+
+def test_replay_cannot_claim_a_new_observation_time(tmp_path):
+    source = tmp_path / '123/tao_collect.json'
+    source.parent.mkdir()
+    base = dict(checked_at='2026-11-06T00:00:00Z',
+                performance={'wallets': []})
+    source.write_text(json.dumps(base))
+    replay = tmp_path / 'local-native/tao_collect.json'
+    replay.parent.mkdir()
+    replay.write_text(json.dumps(dict(
+        base, checked_at='2026-11-08T00:00:00Z', local_evidence=dict(
+            source_snapshot=base['checked_at'],
+            source_report_sha256=hashlib.sha256(
+                source.read_bytes()).hexdigest()))))
+    assert replay.resolve() not in viewer._cached(tmp_path)
 
 
 def checkpoint(path):

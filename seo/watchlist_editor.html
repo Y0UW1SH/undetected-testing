@@ -42,6 +42,11 @@ legend{font-weight:600;margin:0 0 5px}.choices{display:flex;gap:5px;flex-wrap:wr
 .notice{min-height:22px;font-size:13px}.emptybox{padding:24px 8px;color:var(--muted);border-bottom:1px solid var(--line)}
 .reportlinks{display:flex;gap:8px 18px;align-items:center;flex-wrap:wrap;margin:0 0 8px;font-size:13px}.reportlinks .brand{margin-right:auto}
 .ranks{display:flex;gap:7px 16px;flex-wrap:wrap;font-size:13px}.ranks span{white-space:nowrap}
+.viewtabs{margin-top:18px;margin-bottom:0}.groups-note{margin:9px 0 15px}.group-members,.connections{list-style:none;padding:0;margin:0}
+.group-members li,.connections li{padding:10px 0;border-bottom:1px solid var(--line)}.group-members .walletpick{max-width:100%;padding-left:0}
+.connections p{margin:4px 0}.connections .address{font-size:12px}.group-actions{margin:16px 0}.group-actions .caption{margin:8px 0}
+.group-extra{margin-top:24px}.group-extra summary{cursor:pointer;font-weight:600}.group-search{margin-top:14px;max-width:100%}
+.member-choice{display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer}.member-choice input{accent-color:var(--green)}
 dialog{background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:22px;width:min(450px,calc(100vw - 30px))}
 dialog::backdrop{background:rgba(17,37,29,.37)}dialog .field{margin:15px 0 8px}.btnrow{display:flex;gap:8px;align-items:center}
 @media(max-width:850px){.columns{grid-template-columns:1fr}.inspector{position:static;max-height:none;overflow:visible;border-left:0;border-top:2px solid var(--ink);padding:20px 0 0}.back-directory{display:inline-block;margin-top:16px}.walletpick{max-width:210px}}
@@ -49,10 +54,12 @@ dialog::backdrop{background:rgba(17,37,29,.37)}dialog .field{margin:15px 0 8px}.
 </style>
 </head>
 <body><main>
-<header class="mast"><nav class="reportlinks" aria-label="Local reports"><span class="brand">Wallet ledger</span><a href="/wallets.html">Wallet report</a><a href="/accounts.html">Taostats accounts</a><a href="/network.html">Transfer explorer</a></nav><h1>Private watchlist</h1>
+<header class="mast"><nav class="reportlinks" aria-label="Local reports"><span class="brand">Wallet ledger</span><a href="/wallets-native.html">Native wallet report</a><a href="/native-holders.html">Native holders</a><a href="/wallets.html">Wallet report</a><a href="/accounts.html">Taostats accounts</a><a href="/network.html">Transfer explorer</a></nav><h1>Private watchlist</h1>
 <p class="description">Choose which wallets your local monitor follows. Labels, notes and overrides stay on this PC.</p></header>
+<div class="tabs viewtabs" aria-label="Research view"><button class="tab" data-view="wallets" aria-pressed="true">Wallets</button><button class="tab" data-view="groups" aria-pressed="false">Linked groups</button></div>
 <div class="columns">
-<section class="directory" aria-labelledby="wallets-heading">
+<section class="directory" aria-label="Wallet research">
+<div id="wallet-directory">
 <div class="dirhead"><h2 id="wallets-heading">Wallet directory</h2><div class="btnrow"><button type="button" id="reload">Refresh</button><button type="button" id="add" class="primary">Add address</button></div></div>
 <p id="coverage" class="caption" role="status">Loading saved research…</p>
 <details class="scope"><summary>Why do reports show fewer wallets?</summary><p>The wallet report opens one scan. A wallet only appears in a ranking when its history supports that flag. This list combines the downloaded scans. Searching the Taostats directory also finds addresses whose trades we haven't inspected yet.</p></details>
@@ -64,6 +71,18 @@ dialog::backdrop{background:rgba(17,37,29,.37)}dialog .field{margin:15px 0 8px}.
 <div class="tablewrap"><table><thead><tr><th>Wallet</th><th>Evidence</th><th class="right">Realized TAO</th><th>Monitoring</th></tr></thead><tbody id="rows"></tbody></table></div>
 <p id="list-empty" class="emptybox" hidden></p>
 <div class="actions" style="margin-top:12px"><button id="more" hidden>Show more wallets</button></div>
+</div>
+<div id="group-directory" hidden>
+<div class="dirhead"><h2 id="groups-heading">Linked-wallet groups</h2><button id="reload-groups" type="button">Refresh groups</button></div>
+<p class="caption groups-note">Groups connect wallets through confirmed transfers or documented coldkey changes. Connections do not establish common ownership, friendship, or coordinated trading.</p>
+<label class="field group-search">Find a group member<input id="group-query" type="search" placeholder="Address, prefix or private label" autocomplete="off" spellcheck="false"></label>
+<p id="group-list-status" class="caption listmsg" role="status">Loading saved connections…</p>
+<div class="tablewrap"><table><thead><tr><th>Members</th><th>Connections</th><th class="right">Total P/L · TAO</th><th>Watching</th></tr></thead><tbody id="group-rows"></tbody></table></div>
+<p id="group-empty" class="emptybox" hidden>No supported groups in these saved reports. Transfers without sufficient evidence remain separate below.</p>
+<div class="actions" style="margin-top:12px"><button id="more-groups" hidden>Show more groups</button></div>
+<p class="caption groups-note">Complete groups sort by total P/L. Partial or differently dated records have unknown group P/L. Current holdings can span any subnet; this is saved research, not a live trading signal.</p>
+<details class="group-extra" id="other-connections" hidden><summary id="other-connections-title">Other connections</summary><p class="caption groups-note">Inferred matches, unverified links, and connections through screened or highly connected wallets do not merge groups.</p><ul id="other-edges" class="connections"></ul><button id="more-connections" hidden>Show more connections</button></details>
+</div>
 </section>
 <aside class="inspector" aria-labelledby="detail-title">
 <h2 id="detail-title" tabindex="-1">Wallet details</h2><p id="choose" class="description">Choose a wallet to review its history and edit your monitoring preference.</p>
@@ -80,7 +99,17 @@ dialog::backdrop{background:rgba(17,37,29,.37)}dialog .field{margin:15px 0 8px}.
 <label class="field">Private label<input id="label" maxlength="100" autocomplete="off"></label>
 <label class="field">Private note<textarea id="note" rows="3" maxlength="2000"></textarea></label>
 <div class="actions"><button id="save" class="primary" disabled>Save changes</button><span id="save-status" class="notice" role="status"></span></div>
-</form><a class="back-directory" href="#wallets-heading">Back to wallet directory</a></div></aside></div>
+</form><a class="back-directory" href="#wallets-heading">Back to wallet directory</a></div>
+<div id="group-detail" hidden>
+<p id="group-id" class="caption mono address"></p>
+<p class="caption groups-note">These are connected addresses. Shared control and coordinated trading are unproven.</p>
+<dl class="specs" id="group-specs"></dl><p id="group-basis" class="caption"></p>
+<div class="group-actions"><button id="watch-group" type="button" class="primary">Watch group members</button><p id="group-watch-preview" class="caption"></p><p id="group-save-status" class="notice" role="status"></p></div>
+<h3>Member wallets</h3><ul id="group-members" class="group-members"></ul>
+<h3>Connection evidence</h3><ul id="group-evidence" class="connections"></ul>
+<details id="group-bridges" class="group-extra" hidden><summary>Connections excluded from this group</summary><ul id="group-bridge-edges" class="connections"></ul></details>
+<a class="back-directory" href="#groups-heading">Back to linked groups</a>
+</div></aside></div>
 <dialog id="add-dialog" aria-labelledby="dialog-title"><h2 id="dialog-title">Add a wallet</h2><form id="add-form">
 <label class="field">Bittensor coldkey<input id="new-address" class="mono" autocomplete="off" spellcheck="false" required></label>
 <p id="add-error" class="notice error" role="status"></p><div class="actions"><button class="primary">Review address</button><button type="button" id="cancel-add">Cancel</button></div></form></dialog>
@@ -94,7 +123,9 @@ const prefix=/^5[1-9A-HJ-NP-Za-km-z]{2,47}$/;
 const token=document.querySelector('meta[name="watchlist-token"]').content;
 const state={wallets:new Map(), remote:new Map(), drafts:new Map(), selected:null,focused:null,
   scope:'all',limit:40,scanCount:0,census:null,searchMessage:'',searchTimer:null,
-  searchRequest:null,searchSerial:0,initialError:'',busy:new Set(),loading:false};
+  searchRequest:null,searchSerial:0,initialError:'',busy:new Set(),loading:false,
+  view:'wallets',groups:new Map(),groupEdges:new Map(),groupNodes:{},selectedGroup:null,
+  groupLoading:false,groupError:'',groupBusy:false,groupLimit:40,edgeLimit:30,groupSelection:new Map()};
 const explicit=new Set(['watch','mute','auto']);
 const ranked=value=>value!==null&&value!==undefined&&value!==false&&value!=='';
 const number=value=>typeof value==='number'&&Number.isFinite(value);
@@ -207,18 +238,197 @@ function evidenceBlock(title,words){
   words.forEach(text=>ul.append(node('li',text)));
   ui.evidence.append(node('h3',title),ul);
 }
+function showView(view){
+  state.view=view;
+  ui['wallet-directory'].hidden=view!=='wallets';ui['group-directory'].hidden=view!=='groups';
+  document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===view)));
+}
+function groupWallets(group){return items(group.members).map(a=>getWallet(a)||stub(a));}
+function broadGroup(group){return group.watchable===false||group.oversized===true||items(group.members).length>50;}
+function selectedMembers(group){
+  const selected=state.groupSelection.get(group.id);
+  return groupWallets(group).filter(w=>choice(w)!=='mute'&&
+    (selected?selected.has(w.address):!broadGroup(group)));
+}
+function groupTotal(group){
+  const e=group.economics||{};
+  return e.rankable===true&&e.status==='complete_same_snapshot'?e.total_pnl_tao:null;
+}
+function groupList(){
+  const query=ui['group-query'].value.trim().toLowerCase();
+  const groups=[...state.groups.values()].filter(g=>!query||groupWallets(g).some(w=>
+    w.address.toLowerCase().includes(query)||(w.label||'').toLowerCase().includes(query)));
+  groups.sort((a,b)=>{
+    const av=groupTotal(a),bv=groupTotal(b);
+    if(number(av)!==number(bv))return number(av)?-1:1;
+    return (number(av)&&av!==bv?bv-av:items(b.members).length-items(a.members).length)||a.id.localeCompare(b.id);
+  });
+  const rows=document.createDocumentFragment();
+  for(const g of groups.slice(0,state.groupLimit)){
+    const members=groupWallets(g),row=node('tr');
+    row.classList.toggle('selected',g.id===state.selectedGroup);
+    const first=members[0],pick=node('button',members.length+' wallets','walletpick');
+    pick.type='button';pick.setAttribute('aria-label','Inspect linked group '+g.id);
+    if(first)pick.append(node('span',(first.label||short(first.address))+' + '+(members.length-1),'smalladdr'));
+    pick.onclick=()=>selectGroup(g,true);
+    const title=node('td');title.append(pick);
+    const amount=groupTotal(g),profit=node('td',pnl(amount),'right');
+    if(number(amount)&&amount!==0)profit.classList.add(amount>0?'positive':'negative');
+    row.append(title,node('td',items(g.edge_ids).length+' supported','small'),profit,
+      node('td',members.filter(watching).length+' / '+members.length,'state'));
+    rows.append(row);
+  }
+  ui['group-rows'].replaceChildren(rows);
+  ui['group-empty'].hidden=Boolean(groups.length)||state.groupLoading||Boolean(state.groupError);
+  ui['group-empty'].textContent=query?'No group members match this search. Try another address or private label.':
+    'No supported groups in these saved reports. Transfers without sufficient evidence remain separate below.';
+  ui['more-groups'].hidden=state.groupLimit>=groups.length;
+  const status=state.groupError||(state.groupLoading?'Loading saved connections…':
+    groups.length.toLocaleString()+' linked groups · '+groups.filter(g=>number(groupTotal(g))).length+' with complete group P/L');
+  msg(ui['group-list-status'],status,Boolean(state.groupError));
+}
+function connectionRow(edge){
+  const li=node('li'),status=edge.status==='confirmed'?'Confirmed transfer':
+    edge.status==='documented'?'Documented coldkey change':edge.status==='inferred'?'Inferred connection':'Unverified connection';
+  li.append(node('strong',status),node('p',String(edge.src||'Unknown')+' → '+String(edge.dst||'Unknown'),'mono address'));
+  const details=[human(edge.kind||'connection'),human(edge.evidence||'evidence unavailable')];
+  if(number(edge.netuid))details.push('SN'+edge.netuid);
+  if(number(edge.alpha))details.push(format(edge.alpha)+' α');
+  if(number(edge.tao))details.push(format(edge.tao)+' TAO');
+  if(edge.amount_is_inferred===true)details.push('amount inferred');
+  if(edge.time)details.push(day(edge.time));
+  li.append(node('p',details.join(' · '),'caption'));
+  if(/^\d+-\d+$/.test(edge.extrinsic||'')){
+    const receipt=node('a','View transaction '+edge.extrinsic);
+    receipt.href='https://taostats.io/extrinsic/'+edge.extrinsic;receipt.target='_blank';receipt.rel='noopener noreferrer';
+    li.append(receipt);
+  }
+  const sources=items(edge.source_reports).map(s=>typeof s==='string'?s:
+    [s.source,day(s.checked_at)].filter(Boolean).join(' · '));
+  if(sources.length)li.append(node('p','Saved sources: '+sources.join('; '),'caption'));
+  if(items(edge.exclusion_reasons).length)li.append(node('p','Excluded: '+edge.exclusion_reasons.map(human).join(', '),'caption'));
+  return li;
+}
+function otherConnections(){
+  const edges=[...state.groupEdges.values()].filter(e=>e.group_eligible!==true);
+  ui['other-connections'].hidden=!edges.length;
+  ui['other-connections-title'].textContent='Other connections ('+edges.length+')';
+  ui['other-edges'].replaceChildren(...edges.slice(0,state.edgeLimit).map(connectionRow));
+  ui['more-connections'].hidden=state.edgeLimit>=edges.length;
+}
+function selectGroup(group,move,focusMember){
+  showView('groups');state.selectedGroup=group.id;
+  ui.choose.hidden=true;ui.detail.hidden=true;ui['group-detail'].hidden=false;
+  const members=groupWallets(group),e=group.economics||{},complete=number(groupTotal(group));
+  ui['detail-title'].textContent='Linked group · '+members.length+' wallets';
+  ui['group-id'].textContent=group.id;
+  const tao=value=>number(value)?pnl(value)+' TAO':'Unknown';
+  ui['group-specs'].replaceChildren(metric('Group realized P/L',tao(complete?e.realized_tao:null)),
+    metric('Group open P/L',tao(complete?e.unrealized_tao:null)),
+    metric('Group total P/L',tao(groupTotal(group)),groupTotal(group)),
+    metric('Members fully costed',pct(e.coverage_fraction)));
+  let basis=complete?'Complete group accounting · '+day(e.as_of)+'.':
+    'Group P/L is unknown. '+items(e.reasons).map(human).join('; ')+'.';
+  if(!complete&&(number(e.known_realized_subtotal_tao)||number(e.known_unrealized_subtotal_tao))){
+    basis+=' Known portions at '+day(e.subtotal_as_of)+': '+tao(e.known_realized_subtotal_tao)+
+      ' realized; '+tao(e.known_unrealized_subtotal_tao)+' open. These are partial subtotals, not group returns.';
+  }
+  ui['group-basis'].textContent=basis+' Metrics describe all '+members.length+' group members.';
+  const muted=members.filter(w=>choice(w)==='mute').length;
+  const selected=selectedMembers(group),already=selected.filter(w=>choice(w)==='watch').length;
+  const broad=broadGroup(group),limit=broad?24:50;
+  ui['watch-group'].textContent='Watch '+selected.length+' selected member'+(selected.length===1?'':'s');
+  ui['watch-group'].disabled=state.groupBusy||state.groupLoading||state.loading||Boolean(state.groupError)||
+    Boolean(state.initialError)||!selected.length||selected.length>limit||members.some(w=>state.busy.has(w.address));
+  ui['group-watch-preview'].textContent=(broad?'Broad network: choose up to 24 members below. ':'')+
+    (selected.length-already)+' will be added to your explicit watchlist; '+already+' already watched. '+muted+
+    ' muted member'+(muted===1?' stays':'s stay')+' muted. Saved labels and notes are kept.'+
+    (selected.length>limit?' Reduce your selection to '+limit+' members.':'')+
+    (state.initialError?' Refresh the wallet list to load your current preferences.':'');
+  let focusControl=null;
+  const memberRows=members.map(w=>{
+    const li=node('li'),pick=node('button',w.label||short(w.address),'walletpick');
+    pick.type='button';pick.append(node('span',w.address,'smalladdr mono'));
+    pick.onclick=()=>select(w,true);
+    const include=node('input');include.type='checkbox';
+    include.checked=selected.some(member=>member.address===w.address);
+    include.disabled=choice(w)==='mute'||state.groupBusy;
+    include.setAttribute('aria-label','Include '+(w.label||w.address)+' in group watch');
+    if(w.address===focusMember)focusControl=include;
+    include.onchange=()=>{
+      const chosen=new Set(selectedMembers(group).map(member=>member.address));
+      if(include.checked)chosen.add(w.address);else chosen.delete(w.address);
+      state.groupSelection.set(group.id,chosen);selectGroup(group,false,w.address);
+    };
+    const label=node('label',undefined,'member-choice');label.append(include,node('span','Include'));
+    const line=node('div',undefined,'line');line.append(pick,label);
+    const research=state.groupNodes[w.address]||{},holdings=research.holds_now===true?
+      'Held at inspection: '+items(research.held_netuids).map(n=>'SN'+n).join(', '):
+      research.holds_now===false?'No subnet holdings at inspection':'Current holdings unconfirmed';
+    const action=choice(w)==='mute'?'Excluded from group watch':choice(w)==='watch'?'Already explicitly watched':
+      include.checked?'Selected for group watch':'Not selected';
+    li.append(line,node('p',choiceLabel(w)+' · '+action,'caption'),node('p',holdings,'caption'));
+    return li;
+  });
+  ui['group-members'].replaceChildren(...memberRows);
+  const edges=items(group.edge_ids).map(id=>state.groupEdges.get(id)).filter(Boolean);
+  ui['group-evidence'].replaceChildren(...edges.map(connectionRow));
+  const bridges=items(group.bridge_edge_ids).map(id=>state.groupEdges.get(id)).filter(Boolean);
+  ui['group-bridges'].hidden=!bridges.length;
+  ui['group-bridge-edges'].replaceChildren(...bridges.map(connectionRow));
+  msg(ui['group-save-status'],state.groupBusy?'Saving group members…':'');groupList();
+  if(focusControl)focusControl.focus({preventScroll:true});
+  if(move){
+    ui['detail-title'].focus({preventScroll:true});
+    if(window.matchMedia('(max-width:850px)').matches)ui['detail-title'].scrollIntoView({block:'start'});
+  }
+}
+async function loadGroups(){
+  if(state.groupLoading||state.groupBusy)return;
+  state.groupLoading=true;ui['reload-groups'].disabled=true;groupList();
+  ui['watch-group'].disabled=true;
+  try{
+    const res=await fetch('/api/groups',{cache:'no-store'});
+    if(!res.ok)throw new Error('Group research unavailable');
+    const data=await res.json();
+    if(!Array.isArray(data.groups)||!Array.isArray(data.edges))throw new Error('Incomplete group research');
+    state.groups=new Map(data.groups.map(g=>[g.id,g]));
+    state.groupEdges=new Map(data.edges.map(e=>[e.id,e]));state.groupNodes=data.nodes||{};
+    state.groupError='';otherConnections();
+  }catch(error){state.groupError='Could not load linked groups. Use Refresh groups to retry.';}
+  finally{
+    state.groupLoading=false;ui['reload-groups'].disabled=false;groupList();
+    if(state.view==='groups')openView('groups');
+  }
+}
+function openView(view){
+  showView(view);
+  if(view==='wallets'){
+    const wallet=getWallet(state.selected)||ordered([...state.wallets.values()])[0];
+    if(wallet){select(wallet,false);return;}
+  }else{
+    const group=state.groups.get(state.selectedGroup)||state.groups.values().next().value;
+    if(group){selectGroup(group,false);return;}
+  }
+  ui.detail.hidden=true;ui['group-detail'].hidden=true;ui.choose.hidden=false;
+  ui['detail-title'].textContent=view==='groups'?'Group details':'Wallet details';
+  ui.choose.textContent=view==='groups'?'Choose a linked group to review its members and transfer evidence.':
+    'Choose a wallet to review its history and edit your monitoring preference.';
+}
 function updateSave(w){
   const d=draftFor(w),dirty=changed(w,d);
-  ui.save.disabled=!dirty||state.busy.has(w.address);
+  ui.save.disabled=!dirty||state.busy.has(w.address)||state.groupBusy;
   return dirty;
 }
 function select(w,move){
+  showView('wallets');ui['group-detail'].hidden=true;
   state.selected=w.address;state.focused=w;ui.choose.hidden=true;ui.detail.hidden=false;
   ui['detail-title'].textContent=w.label||short(w.address);
   ui['full-address'].textContent=w.address;
   ui.taostats.href='https://taostats.io/account/'+encodeURIComponent(w.address);
   ui['research-state'].textContent=w.inspected?'History inspected · '+day(w.checked_at):
     'History uninspected. Saving a monitoring preference does not collect past trades.';
+  if(w.accounting_source==='native_replay')ui['research-state'].textContent+=' · Accounting replayed with native transfer evidence.';
   const unresolved=w.unresolved_sale_proceeds??w.unresolved_sale_proceeds_tao;
   const tao=v=>number(v)?pnl(v)+' TAO':'Unknown';
   ui.specs.replaceChildren(metric('Recorded fills',number(w.fills)?format(w.fills):'Unknown'),
@@ -302,11 +512,16 @@ async function load(){
     state.wallets=index(data.wallets);state.scanCount=data.scan_count;state.census=data.census_rows;
     state.initialError='';reportScope();const selected=getWallet(state.selected);
     const first=ordered([...state.wallets.values()])[0];
-    if(selected||first)select(selected||first,false);
+    if(state.view==='wallets'&&(selected||first))select(selected||first,false);
+    else if(state.view==='groups')openView('groups');
+    groupList();
   }catch(error){
     state.initialError='The local watchlist could not be loaded. Use Refresh to retry.';
     if(!state.wallets.size)ui.coverage.textContent='Local research unavailable.';
-  }finally{state.loading=false;ui.reload.disabled=false;list();}
+  }finally{
+    state.loading=false;ui.reload.disabled=false;list();
+    if(state.view==='groups')openView('groups');
+  }
 }
 function search(){
   const query=ui.query.value.trim();
@@ -339,7 +554,7 @@ ui.edit.addEventListener('input',()=>{
   msg(ui['save-status'],updateSave(w)?'Unsaved changes':'');
 });
 ui.edit.addEventListener('submit',async event=>{
-  event.preventDefault();const w=getWallet(state.selected);if(!w||state.busy.has(w.address))return;
+  event.preventDefault();const w=getWallet(state.selected);if(!w||state.busy.has(w.address)||state.groupBusy)return;
   const payload={address:w.address,...draftFor(w)};state.busy.add(w.address);
   ui.save.disabled=true;msg(ui['save-status'],'Saving…');
   try{
@@ -360,6 +575,47 @@ ui.edit.addEventListener('submit',async event=>{
   }
 });
 ui.query.addEventListener('input',search);
+ui['watch-group'].onclick=async()=>{
+  const group=state.groups.get(state.selectedGroup);
+  if(!group||state.groupBusy||state.groupLoading||state.groupError||ui['watch-group'].disabled)return;
+  state.groupBusy=true;selectGroup(group,false);ui['reload-groups'].disabled=true;
+  const selected=getWallet(state.selected);if(selected)updateSave(selected);
+  try{
+    const payload={group_id:group.id};
+    if(broadGroup(group)||state.groupSelection.has(group.id))payload.members=selectedMembers(group).map(w=>w.address);
+    const response=await fetch('/api/groups/watch',{method:'POST',
+      headers:{'Content-Type':'application/json','X-Watchlist-Token':token},
+      body:JSON.stringify(payload)});
+    const body=await response.json();
+    if(!response.ok||body.ok!==true)throw new Error(typeof body.error==='string'?body.error:'Could not save this group.');
+    for(const [field,value] of [['watched','watch'],['muted','mute']]){
+      for(const address of items(body[field])){
+        const w=getWallet(address)||stub(address);state.wallets.set(address,{...w,choice:value});
+      }
+    }
+    state.groupBusy=false;reportScope();list();groupList();
+    if(state.view==='groups'&&state.selectedGroup===group.id){
+      selectGroup(group,false);msg(ui['group-save-status'],'Saved on this PC. '+items(body.watched).length+
+        ' members watched; '+items(body.muted).length+' remain muted.');
+    }
+  }catch(error){
+    state.groupBusy=false;
+    if(state.view==='groups'&&state.selectedGroup===group.id){
+      selectGroup(group,false);msg(ui['group-save-status'],error.message||'Unable to save. Please retry.',true);
+    }
+  }finally{
+    state.groupBusy=false;ui['reload-groups'].disabled=false;
+    if(state.view==='groups'&&state.selectedGroup!==group.id){
+      const active=state.groups.get(state.selectedGroup);if(active)selectGroup(active,false);
+    }
+    const current=getWallet(state.selected);if(current)updateSave(current);
+  }
+};
+document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>openView(b.dataset.view));
+ui['group-query'].oninput=()=>{state.groupLimit=40;groupList();};
+ui['more-groups'].onclick=()=>{state.groupLimit+=40;groupList();};
+ui['more-connections'].onclick=()=>{state.edgeLimit+=30;otherConnections();};
+ui['reload-groups'].onclick=loadGroups;
 ui.filter.onchange=ui.sort.onchange=()=>{state.limit=40;list();};
 document.querySelectorAll('[data-scope]').forEach(b=>b.onclick=()=>{state.scope=b.dataset.scope;state.limit=40;list();});
 ui.more.onclick=()=>{state.limit+=40;list();};
@@ -377,4 +633,5 @@ ui['add-form'].onsubmit=event=>{
   ui['add-dialog'].close();select(w,true);
 };
 load();
+loadGroups();
 </script></body></html>

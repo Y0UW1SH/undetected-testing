@@ -222,6 +222,14 @@ Labels, notes, and choices stay on this PC in
 Adding an address starts forward observation; it doesn't fetch its historical
 buy prices. The wallet collection workflow handles that separately.
 
+The **Groups** tab shows documented transfers, funding leads and inferred links
+separately. Select individual members or watch a small group together. Broad
+networks require selecting up to 24 members; existing mutes, labels and notes are
+preserved. A link does not establish shared ownership. Group profit remains
+partial when members have incomplete costs or different observation dates.
+See [native discovery and evidence](tao-native-evidence.md) for subnet coverage,
+research priorities and local accounting corrections.
+
 Automatic selection uses the screened GitHub watchlist plus up to three
 leaders each for realized profit, open profit, early buys and timely exits.
 Reports with partial cost show the known portion separately. An inspected

@@ -4,6 +4,8 @@ import argparse
 from collections import defaultdict
 from contextlib import closing
 from datetime import datetime
+from functools import lru_cache
+import hashlib
 from html import escape
 import json
 import os
@@ -13,7 +15,7 @@ import sqlite3
 import sys
 import tempfile
 
-from seo.tao_view import run_snapshot
+from seo.tao_view import _report_date, run_snapshot
 
 
 def _json(path):
@@ -29,7 +31,8 @@ def _new():
                 screen_status="unassessed", win_rate=None,
                 current_inventory=False, balance_tao=None,
                 balance_fetched_at=None, timing={},
-                stamp=None, coverage={}, in_directory=False)
+                stamp=None, coverage={}, in_directory=False,
+                accounting_source=None)
 
 
 def _screen_status(wallet, coverage, settings, stamp):
@@ -61,6 +64,20 @@ def _open(wallet, positions):
     return pnl, fraction
 
 
+@lru_cache(maxsize=128)
+def _identity(path, modified, size):
+    raw = path.read_bytes()
+    data = json.loads(raw)
+    _report_date(data)
+    return (data['checked_at'], hashlib.sha256(raw).hexdigest(),
+            data.get('local_evidence') or {})
+
+
+def _file_identity(path):
+    stat = path.stat()
+    return _identity(path, stat.st_mtime_ns, stat.st_size)
+
+
 def _cached(cache):
     if cache is None:
         return set()
@@ -79,6 +96,26 @@ def _cached(cache):
             if path is not None:
                 paths.add(path.resolve())
         except (OSError, ValueError):
+            continue
+    # Local corrections keep the source observation date. Only use them while
+    # their exact downloaded source artifact remains available and unchanged.
+    sources = {}
+    for path in paths:
+        try:
+            stamp, digest, _ = _file_identity(path)
+            sources[digest] = stamp
+        except (OSError, ValueError, TypeError):
+            continue
+    for folder in folders:
+        if not re.fullmatch(r'local-native(?:-[a-z0-9_-]+)?', folder.name):
+            continue
+        path = folder / 'tao_collect.json'
+        try:
+            stamp, _, evidence = _file_identity(path)
+            source_stamp = sources.get(evidence.get('source_report_sha256'))
+            if stamp == source_stamp == evidence.get('source_snapshot'):
+                paths.add(path.resolve())
+        except (OSError, ValueError, TypeError, AttributeError):
             continue
     return paths
 
@@ -99,14 +136,15 @@ def _research(paths, cached):
         when = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
         if when.tzinfo is None:
             raise ValueError("Wallet report timestamp must include timezone")
+        priority = when, bool(data.get('local_evidence'))
         snapshots.add(stamp)
         coverage = data.get("coverage") or {}
         performance = data.get("performance") or {}
         for wallet in performance.get("wallets", []):
             a = wallet["address"]
-            if a not in coverage or when < updated.get(a, when):
+            if a not in coverage or priority < updated.get(a, priority):
                 continue
-            updated[a] = when
+            updated[a] = priority
             w = wallets.setdefault(a, _new())
             positions = wallet.get("positions") or []
             subnets = sorted({p["netuid"] for p in positions
@@ -122,7 +160,9 @@ def _research(paths, cached):
             position_fields = ("netuid", "alpha", "known_alpha",
                                "probable_alpha", "unknown_alpha",
                                "known_buy_price_tao", "price_tao",
-                               "known_unrealized_tao", "current_quote")
+                               "known_unrealized_tao", "current_quote",
+                               "growth_alpha", "known_growth_value_tao",
+                               "known_effective_cost_per_alpha_tao")
             held = [{k: p.get(k) for k in position_fields} for p in positions
                     if wallet.get("current_inventory") and p.get("netuid")
                     and (p.get("alpha") or 0) > 0]
@@ -132,6 +172,8 @@ def _research(paths, cached):
                       for side, sample in (wallet.get("timing") or {}).items()
                       if side in ("buy", "sell")}
             w.update(stamp=stamp, subnets=subnets, held=held,
+                     accounting_source=('native_replay' if data.get(
+                         'local_evidence') else 'hosted'),
                      current_inventory=wallet.get("current_inventory") is True,
                      balance_tao=wallet.get("balance_tao"),
                      balance_fetched_at=wallet.get("balance_fetched_at"),
@@ -152,8 +194,8 @@ def _research(paths, cached):
                                ("account", "transactions", "transfers")})
         for e in data.get("events", []):
             ident = e.get("id")
-            if ident and (ident not in events or events[ident][0] <= when):
-                events[ident] = (when, e)
+            if ident and (ident not in events or events[ident][0] <= priority):
+                events[ident] = (priority, e)
     subnets = defaultdict(set)
     for _, e in sorted(events.values(), key=lambda pair: (
             pair[1].get("time") or "", pair[1]["id"]), reverse=True):

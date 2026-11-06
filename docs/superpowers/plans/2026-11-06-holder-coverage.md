@@ -47,6 +47,29 @@ Review caught and fixed source-cutoff errors, interior snapshot cost erosion,
 and verified native one-nano rounding moves falsely treated as trades.
 Application validation: 398 tests passed; flake8 clean.
 
+## Broad research and linked watchlists
+
+- [x] Convert observed native shares with exact pinned pool totals, rank within
+  each subnet, and rotate across every active network ID. Expose missing networks
+  and partial discovery rather than claiming a complete census.
+- [x] Use latest history to avoid repeated seed research, with inspected,
+  screened and retry-wait accounts excluded. Keep discovery distinct from
+  verified profit and from a bounded GitHub history batch.
+- [x] Build evidence-preserving transfer groups, retain empty historical wallets,
+  exclude hubs from automatic merging, and prevent stale sender holdings being
+  counted twice in mixed-date group totals.
+- [x] Add local group/member selection with atomic preference updates and retained
+  mutes. Require explicit bounded member selection for broad networks.
+- [x] Prefer validated local native replay at the same source observation time in
+  directory/watchlist views; newer source observations still supersede old replay.
+
+The first native-seeded history validation inspected 26 accounts: ten new seeds,
+six followed accounts and ten linked accounts. That was an explicit batch budget,
+not a source limit. Broader selection now prioritizes material observed holdings
+instead of alphabetical addresses. Validation: 446 application tests passed;
+lint clean. Deeper historical backfill and complete native holder traversal
+remain ongoing research work, not claimed complete by these tests.
+
 ## Constraints
 
 - Never read, publish, or use Dwellir credentials in GitHub Actions.
