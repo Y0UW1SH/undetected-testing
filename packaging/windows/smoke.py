@@ -194,9 +194,6 @@ def smoke(setup, folder, real_backup=None, real_explorer=None):
                    current_env).stdout
 
     print(command("self-test"), end="", flush=True)
-    verify = Path(__file__).with_name("smoke_editor.py")
-    print(run([str(python), "-B", str(verify)], env).stdout, end="",
-          flush=True)
     assert "stopped" in command("status")
     assert "stopped" in command("stop-editor")
     assert "stopped" in command("stop")
@@ -268,6 +265,9 @@ def smoke(setup, folder, real_backup=None, real_explorer=None):
     assert imported.read_bytes() == (real_explorer or sample).read_bytes()
     assert "network.html" in run(cmd, env).stdout
     print("Saved standalone transfer explorer opened offline.", flush=True)
+    verify = Path(__file__).with_name("smoke_editor.py")
+    print(run([str(python), "-B", str(verify)], env).stdout, end="",
+          flush=True)
     keep = app / "user-added.txt"
     keep.write_text("preserve")
     uninstall = install / "Uninstall.exe"
