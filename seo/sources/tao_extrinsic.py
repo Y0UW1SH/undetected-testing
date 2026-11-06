@@ -24,7 +24,8 @@ def confirms_reallocation(detail, paired_sells):
     A remark can accompany a batch; a mixed batch, different asset, or
     unaccounted-for inner call is not proof that all pairs preserved cost.
     """
-    if detail.get("status") != "observed" or detail.get("success") is not True:
+    if (detail.get("status") not in ("observed", "partial")
+            or detail.get("success") is not True):
         return False
     args = detail.get("call_args")
     if not isinstance(args, dict):

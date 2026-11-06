@@ -91,7 +91,22 @@ def _schema(db):
     db.commit()
 
 
-def _read(store, session=None):
+def _cache_call(db, saved, detail):
+    # Partial means a separately requested event page was unavailable. The
+    # extrinsic page itself still contained the typed native call and signer.
+    if detail.get("status") not in ("observed", "partial"):
+        return
+    xid = detail["extrinsic_id"]
+    if (detail["status"] == "partial" and saved.get(xid, {}).get("status")
+            == "observed"):
+        return
+    saved[xid] = detail
+    with db:
+        db.execute("INSERT OR REPLACE INTO wallet_move_evidence VALUES (?,?)",
+                   (xid, json.dumps(detail)))
+
+
+def _read(store, session=None, explicit=()):
     events = [json.loads(r[0]) for r in store.conn.execute(
         "SELECT payload FROM wallet_events")]
     checkpoints = []
@@ -105,6 +120,8 @@ def _read(store, session=None):
                "(extrinsic TEXT PRIMARY KEY, payload TEXT NOT NULL)")
     saved = {r[0]: json.loads(r[1]) for r in db.execute(
         "SELECT extrinsic,payload FROM wallet_move_evidence")}
+    for detail in explicit:
+        _cache_call(db, saved, detail)
     candidates = tao_ledger.matching_reallocation_ids(events)
     if session:
         watched = {r["address"] for r in store.followed()}
@@ -116,11 +133,7 @@ def _read(store, session=None):
                 item = tao_extrinsic.fetch_evidence(session, xid)
             except (ValueError, ChallengeError):
                 continue
-            if item["status"] == "observed":
-                saved[xid] = item
-                with db:
-                    db.execute("INSERT OR REPLACE INTO wallet_move_evidence "
-                               "VALUES (?,?)", (xid, json.dumps(item)))
+            _cache_call(db, saved, item)
     verified = {xid for xid in candidates & set(saved)
                 if tao_extrinsic.confirms_reallocation(
                     saved[xid], [e for e in events if e["kind"] == "sell"
@@ -381,7 +394,7 @@ def collect(args, store):
             for ident, indices in dict.fromkeys(args.extrinsic):
                 session.pause()
                 details.append(fetch_evidence(session, ident, indices))
-        events, checkpoints = _read(store, session)
+        events, checkpoints = _read(store, session, explicit=details)
         from seo.sources.tao_prices import refresh_history
         chart_prices, chart_info = refresh_history(
             store, session, events, chart_limit=args.history_charts)
