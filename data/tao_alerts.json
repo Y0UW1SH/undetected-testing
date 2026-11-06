@@ -1,43 +1,43 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-05T20:09:08+00:00",
-  "previous_run": "2026-11-05T16:46:35+00:00",
+  "checked_at": "2026-11-06T01:06:40+00:00",
+  "previous_run": "2026-11-05T20:09:08+00:00",
   "alerts": [
     {
-      "netuid": 54,
-      "name": "Yanez",
+      "netuid": 38,
+      "name": "ChronoLLM",
       "kind": "price_up",
       "field": "price",
-      "old": 0.004869,
-      "new": 0.005435,
-      "change_pct": 11.62
+      "old": 0.005526,
+      "new": 0.006095,
+      "change_pct": 10.3
     },
     {
-      "netuid": 54,
-      "name": "Yanez",
+      "netuid": 38,
+      "name": "ChronoLLM",
       "kind": "mcap_up",
       "field": "market cap",
-      "old": 27400.0,
-      "new": 30590.0,
-      "change_pct": 11.64
+      "old": 12310.0,
+      "new": 13590.0,
+      "change_pct": 10.4
     },
     {
       "netuid": 99,
       "name": "Thirty Spokes",
       "kind": "price_down",
       "field": "price",
-      "old": 0.001111,
-      "new": 0.000942,
-      "change_pct": -15.21
+      "old": 0.000942,
+      "new": 0.000839,
+      "change_pct": -10.93
     },
     {
       "netuid": 99,
       "name": "Thirty Spokes",
       "kind": "mcap_down",
       "field": "market cap",
-      "old": 1030.0,
-      "new": 873.35,
-      "change_pct": -15.21
+      "old": 873.35,
+      "new": 779.25,
+      "change_pct": -10.77
     }
   ]
 }
