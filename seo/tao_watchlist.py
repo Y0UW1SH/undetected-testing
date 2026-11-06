@@ -1,6 +1,7 @@
 """A private watchlist and research browser served only on this PC."""
 import argparse
 from contextlib import closing
+from datetime import datetime, timezone
 from functools import lru_cache
 import hashlib
 from http.client import HTTPConnection
@@ -114,8 +115,7 @@ def save_group(path, members):
 
 
 @lru_cache(maxsize=2)
-def _group_files(cache, files):
-    from seo.tao_wallet_groups import build_groups
+def _report_files(cache, files):
     reports = []
     for path, _, _ in files:
         try:
@@ -127,7 +127,73 @@ def _group_files(cache, files):
                 reports.append(report)
         except (OSError, ValueError):
             continue
-    return build_groups(reports)
+    return reports
+
+
+@lru_cache(maxsize=2)
+def _group_files(cache, files):
+    from seo.tao_wallet_groups import build_groups
+    return build_groups(_report_files(cache, files))
+
+
+def _risk_inputs(reports):
+    """Keep full attributed profiles and authoritative movement origins."""
+    wallets, movements, receipts = {}, {}, {}
+    ordered = sorted(reports, key=lambda r: (
+        datetime.fromisoformat(r["checked_at"].replace("Z", "+00:00")),
+        bool(r.get("local_evidence"))))
+    for report in ordered:
+        stamp = report["checked_at"]
+        coverage = report.get("coverage") or {}
+        for wallet in (report.get("performance") or {}).get("wallets", []):
+            address = wallet.get("address")
+            if address in coverage:
+                wallets[address] = dict(wallet, stamp=stamp)
+        for field in ("transfer_details", "transfers", "events"):
+            for event in report.get(field) or []:
+                if not isinstance(event, dict):
+                    continue
+                fields = ("extrinsic", "event_index", "kind", "src", "dst",
+                          "netuid", "time")
+                ident = event.get("id") or json.dumps([
+                    event.get(k) for k in fields])
+                movements[ident] = event
+                if field == "transfer_details":
+                    receipts[ident] = event
+    events = []
+    for ident, event in movements.items():
+        receipt = receipts.get(ident, {})
+        same_move = all(event.get(k) == receipt.get(k)
+                        for k in ("kind", "src", "dst", "netuid"))
+        events.append(dict(receipt, **event) if same_move else dict(event))
+    return list(wallets.values()), events
+
+
+@lru_cache(maxsize=2)
+def _risk_files(cache, files, context_file, assessment_minute):
+    from seo.tao_subnet_risk import assess_wallets
+    context, status = None, "unavailable"
+    path, modified, _ = context_file
+    if modified is not None:
+        try:
+            with path.open(encoding="utf8") as source:
+                data = json.load(source)
+            if (isinstance(data, dict)
+                    and isinstance(data.get("subnets"), list)):
+                context, status = data, "available"
+            else:
+                status = "invalid"
+        except (OSError, ValueError):
+            status = "unavailable"
+    wallets, events = _risk_inputs(_report_files(cache, files))
+    assessed_at = datetime.now(timezone.utc).isoformat()
+    risks = assess_wallets(wallets, [context] if context else [],
+                           checked_at=assessed_at, events=events)
+    info = dict(status=status, checked_at=(context or {}).get("checked_at"),
+                block_time=(context or {}).get("block_time"),
+                finalized_block=(context or {}).get("finalized_block"),
+                assessed_at=assessed_at)
+    return risks, info
 
 
 @lru_cache(maxsize=2)
@@ -160,7 +226,32 @@ class Model:
                 preferences(self.prefs))
 
     def groups(self):
-        return _group_files(self.cache, self._files())
+        graph = _group_files(self.cache, self._files())
+        risks, context = self.risks()
+        groups = []
+        for group in graph["groups"]:
+            members = [risks.get(a) for a in group["members"]]
+            summary = dict(
+                invalid_current_valuation=any(
+                    (r or {}).get("invalid_current_valuation") is True
+                    for r in members),
+                provisional_members=sum((r or {}).get("provisional") is True
+                                        for r in members),
+                unassessed_members=sum(r is None for r in members))
+            groups.append(dict(group, subnet_risk=summary))
+        return dict(graph, groups=groups, subnet_risks=risks,
+                    subnet_context=context)
+
+    def risks(self):
+        path = self.cache / "subnet-context.json"
+        try:
+            stat = path.stat()
+            context_file = path, stat.st_mtime_ns, stat.st_size
+        except OSError:
+            context_file = path, None, None
+        assessment_minute = int(datetime.now(timezone.utc).timestamp() // 60)
+        return _risk_files(self.cache, self._files(), context_file,
+                           assessment_minute)
 
     def watch_group(self, item):
         if (not isinstance(item, dict)
@@ -192,17 +283,20 @@ class Model:
         return save_group(self.prefs, group["members"])
 
     @staticmethod
-    def _wallet(a, wallets, reasons, prefs):
+    def _wallet(a, wallets, reasons, prefs, risks=None):
         w = wallets.get(a, {})
         ranks = w.get("ranks", {})
         pref = prefs.get(a, {})
+        risk = (risks or {}).get(a)
+        invalid = (risk or {}).get("invalid_current_valuation") is True
         return dict(address=a, choice=pref.get("choice", "auto"),
                     label=pref.get("label", ""), note=pref.get("note", ""),
                     automatic=bool(reasons.get(a)), reasons=reasons.get(a, []),
                     inspected=bool(w.get("stamp")), fills=w.get("fills", 0),
                     buys=w.get("buys", 0), sells=w.get("sells", 0),
                     known_realized=w.get("known_realized"),
-                    known_open=w.get("known_open"),
+                    known_open=None if invalid else w.get("known_open"),
+                    saved_known_open=w.get("known_open"), subnet_risk=risk,
                     unresolved_sale_proceeds=w.get("unresolved_proceeds"),
                     basis_fraction=w.get("known_value_fraction"),
                     checked_at=w.get("stamp"), screens=w.get("screens", []),
@@ -217,24 +311,27 @@ class Model:
                     timing=w.get("timing", {}),
                     examples=w.get("examples", []),
                     buy_rank=ranks.get("buy"), sell_rank=ranks.get("sell"),
-                    open_rank=ranks.get("open"),
+                    open_rank=None if invalid else ranks.get("open"),
                     profit_rank=ranks.get("profit"))
 
     def data(self):
         wallets, stamps, reasons, prefs = self._base()
+        risks, context = self.risks()
         keys = sorted(wallets.keys() | reasons.keys() | prefs.keys())
         count = None
         if self.db.is_file():
             with closing(_read_db(self.db)) as db:
                 count, = db.execute("SELECT COUNT(*) FROM census_accounts"
                                     ).fetchone()
-        rows = [self._wallet(a, wallets, reasons, prefs) for a in keys]
-        return dict(wallets=rows, census_rows=count, scan_count=len(stamps))
+        rows = [self._wallet(a, wallets, reasons, prefs, risks) for a in keys]
+        return dict(wallets=rows, census_rows=count, scan_count=len(stamps),
+                    subnet_context=context)
 
     def search(self, prefix):
         if not re.fullmatch(r"5[1-9A-HJ-NP-Za-km-z]{2,47}", prefix):
             return []
         wallets, _, reasons, prefs = self._base()
+        risks, _ = self.risks()
         addresses = {a for a in wallets.keys() | prefs.keys() | reasons.keys()
                      if a.startswith(prefix)}
         if self.db.is_file():
@@ -245,7 +342,7 @@ class Model:
                     (prefix, prefix + "~")))
         if valid_address(prefix):
             addresses.add(prefix)
-        return [self._wallet(a, wallets, reasons, prefs)
+        return [self._wallet(a, wallets, reasons, prefs, risks)
                 for a in sorted(addresses)[:50]]
 
 

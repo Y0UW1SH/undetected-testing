@@ -1,7 +1,8 @@
 # What each Bittensor source can prove
 
-Use the chain to count accounts and detect movements. Use the explorer to find
-interesting holders and reconstruct price and cost history. Neither a profitable
+Use the chain locally to discover accounts and holders, detect movements, and
+read subnet lifecycle and pool state. Use the explorer where indexed historical
+trades, transfers and quotes save a full archival replay. Neither a profitable
 position nor a money transfer establishes that one person controls two wallets.
 
 | Source | Useful data | Limit |
@@ -26,3 +27,16 @@ On your PC, `python -m seo.tao_chain_census --db PATH --out SUMMARY.json
 and joins its addresses to observed transfers from the supplied report(s).
 Each public transfer receipt retains its evidence and original cost where known.
 Use a new database for a new height. This command refuses to run in CI.
+
+`seo.tao_subnet_context` reads a separately finalized local snapshot of active
+and retained subnet IDs, registration generations, network immunity and pool
+reserves. A new registration can reuse a netuid; a matching number is not proof
+of the same asset. Read the live immunity parameter rather than assuming the
+duration in documentation still matches the deployed runtime. Fully purged
+historical generations require archival evidence, not just today's maps.
+
+The local editor uses this context to flag early-stage, immune, inactive and
+thin-liquidity holdings. Comparing marked position value with TAO reserves is
+an exposure indicator, not slippage. An exact cash-out value needs an executable
+quote for the actual pool implementation, trade size, fees and block. Historical
+realized proceeds remain evidence even when today's exit conditions are poor.

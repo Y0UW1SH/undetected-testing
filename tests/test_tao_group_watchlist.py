@@ -256,6 +256,41 @@ async function test(){
   const selectedPost=requests.filter(r=>r.options.method==='POST').at(-1);
   assert.deepEqual(JSON.parse(selectedPost.options.body),
     {group_id:'group-0123456789abcdef',members:['WalletA']});
+  vm.runInContext(`
+    state.wallets.set('WalletA',{address:'WalletA',inspected:true,
+      checked_at:'2026-11-01T00:00:00Z',known_realized:5,known_open:900,
+      subnet_risk:{status:'flagged',provisional:true,
+        invalid_current_valuation:true,assessed_at:'2026-11-03T00:00:00Z',
+        wallet_as_of:'2026-11-01T00:00:00Z',
+        inventory_as_of:'2026-10-31T00:00:00Z',flags:['generation_changed'],
+        subnets:[{netuid:24,active:false,in_immunity:true,age_blocks:50,
+          immunity_remaining_blocks:100,tao_reserve_tao:'200',
+          context_checked_at:'2026-11-02T00:00:00Z',context_block:2000,
+          held_marked_value_tao:null,exposure_ratio:null,
+          flags:['generation_changed'],reasons:['Registration changed'],
+          mark_compatible:false}]}});
+    select(state.wallets.get('WalletA'),false);
+  `,context);
+  assert.match(nodes.get('subnet-risk').textContent,/Provisional/);
+  assert.match(nodes.get('subnet-risk').textContent,/2026-11-01/);
+  assert.match(nodes.get('subnet-risk').textContent,/Inventory: 2026-10-31/);
+  assert.match(nodes.get('subnet-risk').textContent,/2026-11-02/);
+  assert.match(nodes.get('subnet-risk').textContent,/50 blocks/);
+  assert.match(nodes.get('subnet-risk').textContent,/Inactive/);
+  assert.match(nodes.get('subnet-risk').textContent,/In immunity/);
+  assert.match(nodes.get('subnet-risk').textContent,/Unknown/);
+  assert.match(nodes.get('subnet-risk').textContent,/Cash-out unverified/);
+  assert.doesNotMatch(nodes.get('specs').textContent,/900/);
+  assert.match(nodes.get('specs').textContent,/\+5 TAO/);
+  vm.runInContext(`
+    const riskGroup=state.groups.get('group-0123456789abcdef');
+    riskGroup.economics={status:'complete_same_snapshot',rankable:true,
+      realized_tao:5,unrealized_tao:900,total_pnl_tao:905};
+    selectGroup(riskGroup,false);
+  `,context);
+  assert.match(nodes.get('group-risk').textContent,/provisional/i);
+  assert.doesNotMatch(nodes.get('group-specs').textContent,/900|905/);
+  assert.match(nodes.get('group-specs').textContent,/\+5 TAO/);
 }
 test().catch(error=>{console.error(error);process.exitCode=1;});
 """

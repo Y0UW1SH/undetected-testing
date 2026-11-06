@@ -27,6 +27,9 @@ Python runtime, GitHub CLI, and local watcher dependencies.
    reopens the editor for this data folder. If port 8749 belongs to an editor
    for a different data folder, close that editor first. The monitor reads
    your choices from the installed data folder on each poll.
+   The **Groups** tab lets you review transfer connections and choose members
+   to watch. A transfer does not prove shared ownership. Subnet context is
+   assessed separately from historical profit, with explicit missing/stale data.
 
 ### Move private watch preferences
 
@@ -54,6 +57,16 @@ explorer from an existing census SQLite file, report JSONs or transfer window.
 The optional `-m seo.tao_chain_census` and `-m seo.tao_chain_window` commands
 have `--help` for running bounded local chain scans explicitly. Run these
 from your data directory. Keep provider credentials on the local machine.
+
+Native holder discovery, research priority and subnet context are also bundled.
+From your data directory, invoke the installed `app\runtime\python.exe` by its
+full path with `-m seo.tao_subnet_context --out github_out/subnet-context.json`
+to refresh lifecycle and pool-reserve evidence, using your local `dwellir.txt`.
+On subsequent refreshes, add
+`--previous github_out/subnet-context.json` to retain recent generation history.
+The context file contains public chain evidence; it contains no provider key.
+The editor reloads it when it changes. It is a dated snapshot, not a live sell
+quote, and this command does not start a GitHub workflow or recurring job.
 
 ## Build and verify
 

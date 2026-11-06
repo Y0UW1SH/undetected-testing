@@ -70,6 +70,35 @@ instead of alphabetical addresses. Validation: 446 application tests passed;
 lint clean. Deeper historical backfill and complete native holder traversal
 remain ongoing research work, not claimed complete by these tests.
 
+## Subnet lifecycle and liquidity extension
+
+The user added new subnets, deregistration, immunity and thin liquidity to the
+definition of useful winning-wallet research. Keep these checks local, using a
+separate finalized context snapshot. Read active IDs and the chain's network
+immunity value, registration block and registration counter. Do not substitute
+miner immunity, hardcoded month counts or subnet names for that evidence.
+
+The chosen approach preserves observed trading P/L and adds a separate provisional
+assessment. Hiding all new subnets would discard the early-entry opportunities
+the user wants; treating their marked gains as fully realizable would overstate
+the evidence. Keep them visible with lifecycle and liquidity flags instead.
+
+Use registration generations to detect possible mixed-asset history. Keep old
+receipts auditable, but withhold current valuation claims where old and new
+generations may have been combined. Read raw pool reserves and configuration;
+do not invent a constant-product exit quote for a weighted or unsupported pool.
+Position mark divided by TAO reserves is an exposure warning, not slippage.
+
+Initial adjustable research thresholds: new during the first 216,000 blocks,
+pool TAO below 1,000, or observed position mark above 5% of TAO reserves. These
+are screening defaults, not protocol rules or evidence of safety above a cutoff.
+Missing, stale and generation-conflicting data remain explicit. Context time and
+wallet observation time are shown separately. No automatic watch choices change.
+
+Validation must cover generation reuse, immune boundaries, inactive assets,
+missing/stale snapshots, low reserve and material exposure, retained historical
+realized proceeds, and a packaged editor that runs without importing this checkout.
+
 ## Constraints
 
 - Never read, publish, or use Dwellir credentials in GitHub Actions.

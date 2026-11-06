@@ -1,6 +1,9 @@
 """The Windows launcher ships the editor and isolates its data."""
 import importlib.util
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import zipfile
 
 import pytest
@@ -22,6 +25,31 @@ def test_payload_includes_local_editor_archive_and_template():
               "tao_movement_archive.py", "watchlist_editor.html"}
     assert needed <= set(modules)
     assert all(name.endswith((".py", ".html")) for name in modules)
+
+
+def test_packaged_editor_can_build_groups_without_checkout(tmp_path):
+    """Exercise imports using only the exact installer module allowlist."""
+    package = tmp_path / "payload" / "seo"
+    package.mkdir(parents=True)
+    checkout = WINDOWS.parents[1] / "seo"
+    for name in load("build").MODULES:
+        shutil.copyfile(checkout / name, package / name)
+    data = tmp_path / "data"
+    data.mkdir()
+    script = (
+        "import sys; from pathlib import Path; "
+        "sys.path.insert(0,sys.argv[1]); "
+        "from seo.tao_watchlist import Model; "
+        "from seo import tao_subnet_context, tao_native_priority; "
+        "m=Model(Path(sys.argv[2])); "
+        "assert m.groups()['groups']==[]; "
+        "assert isinstance(m.data()['wallets'],list)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script,
+         str(package.parent), str(data)],
+        cwd=data, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
 
 
 def test_editor_reopens_only_verified_data_root(tmp_path, monkeypatch):

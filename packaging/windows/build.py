@@ -21,7 +21,10 @@ MODULES = ("__init__.py", "tao_view.py", "wallet_view.html",
            "tao_portable.py", "tao_local_watch.py", "tao_chain_census.py",
            "tao_chain_window.py", "tao_network_view.py", "tao_watchlist.py",
            "watchlist_editor.html", "tao_directory_view.py",
-           "tao_movement_archive.py")
+           "tao_movement_archive.py", "tao_wallet_groups.py",
+           "tao_subnet_risk.py", "tao_subnet_context.py",
+           "tao_native_holders.py", "tao_native_priority.py",
+           "tao_native_evidence.py", "tao_holder_queue.py")
 
 
 def sha(path):

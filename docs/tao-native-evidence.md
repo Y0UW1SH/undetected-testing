@@ -102,3 +102,34 @@ its newer recipient. Missing original costs remain unresolved, never zero.
 Select a group or individual members to watch locally. Broad groups require an
 explicit subset of at most 24 members. Group saves are atomic and retain existing
 labels, notes and mutes; this action does not fetch missing historical prices.
+
+## Subnet lifecycle and liquidity context
+
+Refresh a separate finalized snapshot locally:
+
+```powershell
+try_tao_out/watch-env-313/Scripts/python.exe -m seo.tao_subnet_context --db try_tao_out/native_holder_candidates.sqlite --out github_out/subnet-context.json --rpc-limit 120
+```
+
+On subsequent refreshes add `--previous github_out/subnet-context.json` to retain
+up to 32 earlier snapshots. The editor notices file changes; no recurring job is
+created. The context's chain time and the wallet's observation time remain distinct.
+Active and retained IDs come from native maps, augmented by prior observed IDs.
+Fully purged historical subnets still require archival evidence.
+
+Generation identity uses the registration block; the registration counter is
+additional evidence of ID reuse. A missing newer counter on an older subnet does
+not erase its verified registration block. Subnet immunity comes from the live
+network parameter, separately from neuron immunity. Dissolving, inactive and
+explicitly trading-disabled subnets invalidate current exit valuation claims.
+
+Local risk assessment defaults to a 216,000-block early-stage window, a minimum
+1,000-TAO reserve and a 5% marked-position/reserve exposure screen, with 24-hour
+freshness limits. These adjustable research thresholds are not protocol rules.
+The marked-position/reserve ratio is not slippage. Weighted pool metadata and
+reserves alone are not an executable sale quote; no cash-out value is invented.
+
+New and immune subnets remain visible as provisional opportunities. Generation
+conflicts with original purchase evidence suppress current open/combined headline
+values in the editor, while the saved report and dated realized evidence remain
+auditable. Passing context checks does not establish trading skill or safety.

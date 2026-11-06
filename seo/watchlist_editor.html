@@ -65,7 +65,7 @@ dialog::backdrop{background:rgba(17,37,29,.37)}dialog .field{margin:15px 0 8px}.
 <details class="scope"><summary>Why do reports show fewer wallets?</summary><p>The wallet report opens one scan. A wallet only appears in a ranking when its history supports that flag. This list combines the downloaded scans. Searching the Taostats directory also finds addresses whose trades we haven't inspected yet.</p></details>
 <div class="tabs" aria-label="Monitoring filter"><button class="tab" data-scope="all" aria-pressed="true">All wallets</button><button class="tab" data-scope="watching" aria-pressed="false">Watching</button><button class="tab" data-scope="muted" aria-pressed="false">Muted</button></div>
 <div class="filters"><label class="field search">Find wallet<input id="query" type="search" placeholder="Address, prefix or private label" autocomplete="off" spellcheck="false"></label>
-<label class="field">Evidence<select id="filter"><option value="all">All evidence</option><option value="inspected">History inspected</option><option value="uninspected">History uninspected</option><option value="profit_rank">Realized P/L ranked</option><option value="open_rank">Open P/L ranked</option><option value="buy_rank">Historical buy timing</option><option value="sell_rank">Historical sell timing</option><option value="gaps">Evidence gaps</option><option value="screens">Screened out</option></select></label>
+<label class="field">Evidence<select id="filter"><option value="all">All evidence</option><option value="inspected">History inspected</option><option value="uninspected">History uninspected</option><option value="provisional">Provisional subnet context</option><option value="profit_rank">Realized P/L ranked</option><option value="open_rank">Open P/L ranked</option><option value="buy_rank">Historical buy timing</option><option value="sell_rank">Historical sell timing</option><option value="gaps">Evidence gaps</option><option value="screens">Screened out</option></select></label>
 <label class="field">Sort by<select id="sort"><option value="research">Research first</option><option value="both">Known realized + open P/L</option><option value="known_realized">Known realized P/L</option><option value="known_open">Known open P/L</option><option value="checked_at">Latest inspection</option><option value="address">Address</option></select></label></div>
 <p id="list-status" class="caption listmsg" aria-live="polite"></p>
 <div class="tablewrap"><table><thead><tr><th>Wallet</th><th>Evidence</th><th class="right">Realized TAO</th><th>Monitoring</th></tr></thead><tbody id="rows"></tbody></table></div>
@@ -90,6 +90,7 @@ dialog::backdrop{background:rgba(17,37,29,.37)}dialog .field{margin:15px 0 8px}.
 <p id="full-address" class="mono address"></p><a id="taostats" target="_blank" rel="noopener noreferrer">Open on Taostats ↗</a>
 <p id="research-state" class="caption" style="margin-top:10px"></p>
 <dl class="specs" id="specs"></dl><p id="basis-help" class="caption"></p>
+<section id="subnet-risk" aria-label="Subnet risk context"></section>
 <div id="evidence"></div>
 <form class="controls" id="edit"><fieldset><legend>Monitoring preference</legend><div class="choices">
 <label><input type="radio" name="choice" value="watch">Watch</label>
@@ -104,6 +105,7 @@ dialog::backdrop{background:rgba(17,37,29,.37)}dialog .field{margin:15px 0 8px}.
 <p id="group-id" class="caption mono address"></p>
 <p class="caption groups-note">These are connected addresses. Shared control and coordinated trading are unproven.</p>
 <dl class="specs" id="group-specs"></dl><p id="group-basis" class="caption"></p>
+<p id="group-risk" class="caption groups-note"></p>
 <div class="group-actions"><button id="watch-group" type="button" class="primary">Watch group members</button><p id="group-watch-preview" class="caption"></p><p id="group-save-status" class="notice" role="status"></p></div>
 <h3>Member wallets</h3><ul id="group-members" class="group-members"></ul>
 <h3>Connection evidence</h3><ul id="group-evidence" class="connections"></ul>
@@ -124,7 +126,7 @@ const token=document.querySelector('meta[name="watchlist-token"]').content;
 const state={wallets:new Map(), remote:new Map(), drafts:new Map(), selected:null,focused:null,
   scope:'all',limit:40,scanCount:0,census:null,searchMessage:'',searchTimer:null,
   searchRequest:null,searchSerial:0,initialError:'',busy:new Set(),loading:false,
-  view:'wallets',groups:new Map(),groupEdges:new Map(),groupNodes:{},selectedGroup:null,
+  view:'wallets',groups:new Map(),groupEdges:new Map(),groupNodes:{},groupRisks:{},selectedGroup:null,
   groupLoading:false,groupError:'',groupBusy:false,groupLimit:40,edgeLimit:30,groupSelection:new Map()};
 const explicit=new Set(['watch','mute','auto']);
 const ranked=value=>value!==null&&value!==undefined&&value!==false&&value!=='';
@@ -163,10 +165,12 @@ function matches(w,query){
   const filter=ui.filter.value;
   if(filter==='inspected')return w.inspected;
   if(filter==='uninspected')return !w.inspected;
+  if(filter==='provisional')return w.subnet_risk?.provisional===true;
   if(filter==='gaps'||filter==='screens')return items(w[filter]).length>0;
   return filter==='all'||ranked(w[filter]);
 }
 function rankValue(w,field){
+  if(w.subnet_risk?.invalid_current_valuation===true&&['both','known_open'].includes(field))return null;
   if(field==='both')return number(w.known_realized)&&number(w.known_open)?w.known_realized+w.known_open:null;
   return w[field];
 }
@@ -206,7 +210,8 @@ function list(){
     name.append(pick);
     const amount=rankValue(w,field),profit=node('td',pnl(amount),'right');
     if(number(amount)&&amount!==0)profit.classList.add(amount>0?'positive':'negative');
-    row.append(name,node('td',w.inspected?'Inspected':'Uninspected','small'),profit,node('td',choiceLabel(w),'state'));
+    const evidence=(w.inspected?'Inspected':'Uninspected')+(w.subnet_risk?.provisional?' · provisional':'');
+    row.append(name,node('td',evidence,'small'),profit,node('td',choiceLabel(w),'state'));
     fragment.append(row);
   }
   ui.rows.replaceChildren(fragment);
@@ -243,7 +248,12 @@ function showView(view){
   ui['wallet-directory'].hidden=view!=='wallets';ui['group-directory'].hidden=view!=='groups';
   document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===view)));
 }
-function groupWallets(group){return items(group.members).map(a=>getWallet(a)||stub(a));}
+function groupWallets(group){
+  return items(group.members).map(a=>{
+    const w=getWallet(a)||stub(a);
+    return state.groupRisks[a]?{...w,subnet_risk:state.groupRisks[a]}:w;
+  });
+}
 function broadGroup(group){return group.watchable===false||group.oversized===true||items(group.members).length>50;}
 function selectedMembers(group){
   const selected=state.groupSelection.get(group.id);
@@ -252,6 +262,8 @@ function selectedMembers(group){
 }
 function groupTotal(group){
   const e=group.economics||{};
+  if(group.subnet_risk?.invalid_current_valuation===true||
+    groupWallets(group).some(w=>w.subnet_risk?.invalid_current_valuation===true))return null;
   return e.rankable===true&&e.status==='complete_same_snapshot'?e.total_pnl_tao:null;
 }
 function groupList(){
@@ -320,20 +332,27 @@ function selectGroup(group,move,focusMember){
   showView('groups');state.selectedGroup=group.id;
   ui.choose.hidden=true;ui.detail.hidden=true;ui['group-detail'].hidden=false;
   const members=groupWallets(group),e=group.economics||{},complete=number(groupTotal(group));
+  const historicalComplete=e.rankable===true&&e.status==='complete_same_snapshot';
+  const invalid=group.subnet_risk?.invalid_current_valuation===true||members.some(w=>w.subnet_risk?.invalid_current_valuation===true);
   ui['detail-title'].textContent='Linked group · '+members.length+' wallets';
   ui['group-id'].textContent=group.id;
   const tao=value=>number(value)?pnl(value)+' TAO':'Unknown';
-  ui['group-specs'].replaceChildren(metric('Group realized P/L',tao(complete?e.realized_tao:null)),
+  ui['group-specs'].replaceChildren(metric('Group realized P/L',tao(historicalComplete?e.realized_tao:null)),
     metric('Group open P/L',tao(complete?e.unrealized_tao:null)),
     metric('Group total P/L',tao(groupTotal(group)),groupTotal(group)),
     metric('Members fully costed',pct(e.coverage_fraction)));
   let basis=complete?'Complete group accounting · '+day(e.as_of)+'.':
     'Group P/L is unknown. '+items(e.reasons).map(human).join('; ')+'.';
-  if(!complete&&(number(e.known_realized_subtotal_tao)||number(e.known_unrealized_subtotal_tao))){
+  if(invalid)basis='Current group open and combined P/L are unverified for at least one member’s subnet context. Review its lifecycle, registration, and trading-status evidence. Dated realized sales remain separate.';
+  if(!complete&&!invalid&&(number(e.known_realized_subtotal_tao)||number(e.known_unrealized_subtotal_tao))){
     basis+=' Known portions at '+day(e.subtotal_as_of)+': '+tao(e.known_realized_subtotal_tao)+
       ' realized; '+tao(e.known_unrealized_subtotal_tao)+' open. These are partial subtotals, not group returns.';
   }
   ui['group-basis'].textContent=basis+' Metrics describe all '+members.length+' group members.';
+  const provisional=members.filter(w=>w.subnet_risk?.provisional===true).length;
+  const unassessed=members.filter(w=>!w.subnet_risk).length;
+  ui['group-risk'].textContent='Subnet context: '+provisional+' provisional member'+(provisional===1?'':'s')+
+    '; '+unassessed+' without an assessment. Open a member for dated age, immunity, registration, and liquidity evidence. Cash-out unverified; pool exposure is not a slippage estimate.';
   const muted=members.filter(w=>choice(w)==='mute').length;
   const selected=selectedMembers(group),already=selected.filter(w=>choice(w)==='watch').length;
   const broad=broadGroup(group),limit=broad?24:50;
@@ -394,6 +413,7 @@ async function loadGroups(){
     if(!Array.isArray(data.groups)||!Array.isArray(data.edges))throw new Error('Incomplete group research');
     state.groups=new Map(data.groups.map(g=>[g.id,g]));
     state.groupEdges=new Map(data.edges.map(e=>[e.id,e]));state.groupNodes=data.nodes||{};
+    state.groupRisks=data.subnet_risks||{};
     state.groupError='';otherConnections();
   }catch(error){state.groupError='Could not load linked groups. Use Refresh groups to retry.';}
   finally{
@@ -420,6 +440,53 @@ function updateSave(w){
   ui.save.disabled=!dirty||state.busy.has(w.address)||state.groupBusy;
   return dirty;
 }
+function renderSubnetRisk(w){
+  const panel=ui['subnet-risk'],risk=w.subnet_risk;
+  panel.replaceChildren(node('h3','Subnet context'));
+  if(!risk){
+    panel.append(node('p','Subnet context is unassessed for this wallet. Current risk and cash-out value are unknown.','caption'));
+    return;
+  }
+  const summary=risk.provisional===true?'Provisional · review the subnet evidence':
+    risk.status==='no_flags_observed'?'No flags observed in the available context':'Subnet risk context is incomplete';
+  panel.append(node('p',summary),node('p','Wallet report: '+day(risk.wallet_as_of||w.checked_at)+
+    (risk.inventory_as_of?' · Inventory: '+day(risk.inventory_as_of):'')+
+    ' · Assessment: '+day(risk.assessed_at)+'. Context snapshots have their own dates below.','caption'));
+  if(risk.invalid_current_valuation===true)panel.append(node('p',
+    'Current/open valuation is unverified for the held subnet context. Review the lifecycle, registration, and trading-status evidence below. Saved realized sales retain their own dates.','caption'));
+  const rows=node('ul',undefined,'connections');
+  for(const subnet of items(risk.subnets)){
+    const li=node('li');li.append(node('strong','SN'+subnet.netuid));
+    const active=subnet.active===true?'Active':subnet.active===false?'Inactive in this context':'Registration status unknown';
+    const immunity=subnet.in_immunity===true?'In immunity':subnet.in_immunity===false?'Outside immunity':'Immunity unknown';
+    const age=number(subnet.age_blocks)?format(subnet.age_blocks)+' blocks since registration':'Subnet age unknown';
+    const remaining=number(subnet.immunity_remaining_blocks)?' · '+format(subnet.immunity_remaining_blocks)+' immunity blocks remaining':'';
+    li.append(node('p',active+' · '+age+' · '+immunity+remaining,'caption'));
+    li.append(node('p','Chain context: '+day(subnet.context_block_time)+(number(subnet.context_block)?
+      ' · block '+format(subnet.context_block):'')+' · Saved: '+day(subnet.context_checked_at),'caption'));
+    const reserveValue=typeof subnet.tao_reserve_tao==='string'&&/^\d+(?:\.\d+)?$/.test(subnet.tao_reserve_tao)?
+      Number(subnet.tao_reserve_tao):subnet.tao_reserve_tao;
+    const reserve=number(reserveValue)?format(reserveValue)+' TAO':'Unknown';
+    const held=number(subnet.held_marked_value_tao)?format(subnet.held_marked_value_tao)+' TAO':'Unknown';
+    const exposure=subnet.mark_compatible===true?pct(subnet.exposure_ratio):'Unknown';
+    li.append(node('p','TAO reserve: '+reserve+' · Saved held mark: '+held+' · Mark / reserve exposure: '+exposure,'caption'));
+    if(subnet.mark_as_of)li.append(node('p','Saved mark date: '+day(subnet.mark_as_of)+
+      (subnet.mark_latest_as_of&&subnet.mark_latest_as_of!==subnet.mark_as_of?' through '+day(subnet.mark_latest_as_of):''),'caption'));
+    const reasons=items(subnet.reasons).length?subnet.reasons:items(subnet.flags).map(human);
+    if(reasons.length)li.append(node('p',reasons.join('; '),'caption'));
+    rows.append(li);
+  }
+  if(items(risk.subnets).length)panel.append(rows);
+  else panel.append(node('p',w.current_inventory===true?'No held subnet positions in this dated wallet snapshot.':
+    'Current subnet holdings are unconfirmed.','caption'));
+  const settings=risk.settings||{};
+  if(number(settings.new_subnet_blocks)&&number(settings.min_tao_reserve)&&number(settings.max_exposure_ratio)){
+    panel.append(node('p','Context screens: new within '+format(settings.new_subnet_blocks)+
+      ' blocks of registration; low reserve below '+format(settings.min_tao_reserve)+
+      ' TAO; high mark / reserve exposure above '+pct(settings.max_exposure_ratio)+'.','caption'));
+  }
+  panel.append(node('p','Cash-out unverified. Pool reserves and mark / reserve exposure do not provide an executable exit quote or a slippage estimate. Unknown acquisition costs remain unknown.','caption'));
+}
 function select(w,move){
   showView('wallets');ui['group-detail'].hidden=true;
   state.selected=w.address;state.focused=w;ui.choose.hidden=true;ui.detail.hidden=false;
@@ -431,16 +498,19 @@ function select(w,move){
   if(w.accounting_source==='native_replay')ui['research-state'].textContent+=' · Accounting replayed with native transfer evidence.';
   const unresolved=w.unresolved_sale_proceeds??w.unresolved_sale_proceeds_tao;
   const tao=v=>number(v)?pnl(v)+' TAO':'Unknown';
+  const knownOpen=rankValue(w,'known_open');
   ui.specs.replaceChildren(metric('Recorded fills',number(w.fills)?format(w.fills):'Unknown'),
     metric('Held value with confirmed cost',pct(w.basis_fraction)),
     metric('Known realized P/L',tao(w.known_realized),w.known_realized),
-    metric('Known open P/L',tao(w.known_open),w.known_open));
+    metric('Known open P/L',tao(knownOpen),knownOpen));
   ui['basis-help'].textContent=number(unresolved)?'Sale proceeds with unresolved cost: '+format(unresolved)+' TAO.':
     'P/L covers units with a known acquisition cost. Missing data is shown as unknown.';
+  renderSubnetRisk(w);
   ui.evidence.replaceChildren();
   const ranks=node('div',undefined,'ranks');
   for(const [k,name] of [['profit_rank','Realized P/L'],['open_rank','Open P/L'],['buy_rank','Historical buy timing'],['sell_rank','Historical sell timing']]){
-    ranks.append(node('span',name+' · '+(number(w[k])?'#'+w[k]:ranked(w[k])?'Ranked':'Unranked')));
+    const invalidOpen=k==='open_rank'&&w.subnet_risk?.invalid_current_valuation===true;
+    ranks.append(node('span',name+' · '+(invalidOpen?'Unverified':number(w[k])?'#'+w[k]:ranked(w[k])?'Ranked':'Unranked')));
   }
   ui.evidence.append(node('h3','Scan rankings'),ranks);
   const timing=[];
@@ -466,7 +536,7 @@ function select(w,move){
       const known=p.alpha>0?100*p.known_alpha/p.alpha:0;
       pos.append(node('li','SN'+p.netuid+' · '+format(p.alpha)+' α · '+format(known)+
         '% traced · entry on traced units '+price(p.known_buy_price_tao)+' TAO/α · mark '+
-        price(p.current_quote?p.price_tao:null)+' TAO/α'));
+        price(p.current_quote&&w.subnet_risk?.invalid_current_valuation!==true?p.price_tao:null)+' TAO/α'));
     }
     ui.evidence.append(pos);
   }else{
