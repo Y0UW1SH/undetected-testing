@@ -157,3 +157,23 @@ def test_persistent_verification_has_diagnostic_not_empty_success(
     assert h.fetch_holders(tab, 23) == ([], "unavailable")
     assert tab.clicks == 1
     assert "verification" in capsys.readouterr().out
+
+
+def test_holder_read_waits_for_refetch_before_accepting_cached_success(
+        monkeypatch):
+    from seo.sources import tao_holders as h
+
+    class Refetch(Session):
+        reads = 0
+
+        def evaluate(self, js):
+            self.reads += 1
+            result = state(1, 1, [row(A if self.reads == 1 else B, 1)])
+            result["diagnostic"] = {"fetch_status": (
+                "fetching" if self.reads == 1 else "idle")}
+            return result
+
+    monkeypatch.setattr(h.time, "sleep", lambda _: None)
+    tab = Refetch({})
+    result = h._read(tab, 23, 1)
+    assert result["data"][0]["coldkey"]["ss58"] == B

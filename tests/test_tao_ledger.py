@@ -78,6 +78,65 @@ def checkpoint(n, addr, qty, swap=None):
                 units={8: qty} if qty else {}, swap=swap)
 
 
+def test_scoped_zero_anchor_keeps_later_excess_unknown_after_priced_sale():
+    trades = [dict(event(2, "buy", None, "a", 100, 10), netuid=28),
+              dict(event(3, "sell", "a", None, 50, 10), netuid=28)]
+    cp = [dict(checkpoint(1, "a", 0), netuid_scope=[28]),
+          dict(checkpoint(4, "a", 0), units={28: 70})]
+    sales = []
+    positions, stats = portfolio(trades, cp, sale_details=sales)
+    assert sales[0]["basis_status"] == "fully_priced"
+    assert sales[0]["known_cost_tao"] == 5
+    assert stats["a"]["realized_tao"] == 5
+    held = positions["a", 28]
+    assert held["alpha"] == 70 and held["known_alpha"] == 50
+    assert held["known_cost_tao"] == 5
+    assert held["unknown_alpha"] == 20
+    assert held["probable_alpha"] == 0
+    assert held["buy_price_tao"] is None
+
+
+def test_scoped_inventory_does_not_clear_or_change_unqueried_subnets():
+    trades = [event(1, "buy", None, "a", 10, 5),
+              dict(event(3, "buy", None, "a", 100, 10), netuid=28),
+              dict(event(4, "sell", "a", None, 50, 10), netuid=28)]
+    cp = [dict(checkpoint(2, "a", 0), netuid_scope=[28]),
+          dict(checkpoint(5, "a", 0), units={28: 70}, netuid_scope=[28])]
+    positions, _ = portfolio(trades, cp)
+    held = positions["a", 8]
+    assert held["alpha"] == held["known_alpha"] == 10
+    assert held["known_cost_tao"] == 5
+    assert held["unknown_alpha"] == 0
+
+
+def test_full_snapshot_after_scope_only_infers_unanchored_opening_units():
+    trades = [dict(event(2, "buy", None, "a", 100, 10), netuid=28),
+              dict(event(3, "sell", "a", None, 50, 10), netuid=28),
+              event(2, "buy", None, "a", 100, 20, id="other_buy"),
+              event(3, "sell", "a", None, 50, 20, id="other_sell")]
+    cp = [dict(checkpoint(1, "a", 0), netuid_scope=[28]),
+          dict(checkpoint(4, "a", 0), units={28: 70, 8: 70})]
+    sales = []
+    positions, _ = portfolio(trades, cp, sale_details=sales)
+    by_subnet = {s["netuid"]: s for s in sales}
+    assert by_subnet[28]["basis_status"] == "fully_priced"
+    assert by_subnet[28]["known_cost_tao"] == 5
+    assert by_subnet[8]["basis_status"] == "partially_priced"
+    assert abs(by_subnet[8]["known_alpha"] - 125 / 3) < 1e-12
+    assert positions["a", 28]["unknown_alpha"] == 20
+    assert abs(positions["a", 8]["unknown_alpha"] - 35 / 3) < 1e-12
+
+
+def test_scoped_inventory_is_not_evidence_for_inferred_transfers():
+    cp = [checkpoint(1, "a", 10), checkpoint(1, "b", 0),
+          dict(checkpoint(2, "a", 0), netuid_scope=[28]),
+          checkpoint(2, "b", 10)]
+    assert inferred_links(cp, []) == []
+    cp = [checkpoint(1, "a", 10), checkpoint(2, "a", 0, "b"),
+          dict(checkpoint(2, "b", 10), netuid_scope=[8])]
+    assert inferred_links(cp, []) == []
+
+
 def test_coldkey_moves_twice_even_when_receivers_are_new():
     checkpoints = [checkpoint(2, "a", 10), checkpoint(3, "a", 0, "b"),
                    checkpoint(3, "b", 10), checkpoint(4, "b", 0, "c"),

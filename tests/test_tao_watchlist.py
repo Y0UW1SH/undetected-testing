@@ -39,6 +39,23 @@ def test_directory_search_does_not_invent_profit(tmp_path):
     assert wallet["address"] == A and not wallet["inspected"]
     assert wallet["known_realized"] is None and wallet["known_open"] is None
     assert wallet["choice"] == "auto"
+    assert wallet["current_inventory"] is False
+    assert wallet["balance_tao"] is None and wallet["timing"] == {}
+
+
+def test_editor_preserves_empty_inventory_and_historical_timing():
+    timing = {"buy": dict(evaluated=9, mature_trades=18, favorable=9,
+                          trade_days=2, quote_coverage=.5)}
+    known = dict(stamp="2026-01-02T00:00:00Z", current_inventory=True,
+                 balance_tao=.01, balance_fetched_at="2026-01-02T00:00:00Z",
+                 held=[], timing=timing, ranks={"buy": 1})
+    a = wl.Model._wallet(A, {A: known}, {}, {})
+    b = wl.Model._wallet(B, {}, {}, {})
+    assert a["current_inventory"] and a["positions"] == []
+    assert not b["current_inventory"] and b["positions"] == []
+    assert a["balance_tao"] == .01
+    assert a["balance_fetched_at"] == known["balance_fetched_at"]
+    assert a["timing"] == timing and a["buy_rank"] == 1
 
 
 def test_local_editor_save_and_watcher_override(tmp_path):

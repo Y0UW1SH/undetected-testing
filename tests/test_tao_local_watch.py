@@ -133,6 +133,8 @@ def test_watcher_refuses_ci_before_credentials(ci, tmp_path, monkeypatch):
 def test_one_approved_local_pass_writes_feed_and_refreshable_view(
         tmp_path, monkeypatch, capsys):
     from seo import tao_local_watch as watcher
+    # A unit test must not read the user's real private watchlist.
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     monkeypatch.setattr(watcher, "_endpoint", lambda prompt: "local-test")

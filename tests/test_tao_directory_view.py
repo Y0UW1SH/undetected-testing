@@ -137,3 +137,39 @@ def test_traceable_pnl_and_screened_candidates_separate_unassessed_fills(
     assert model["research"]["A"]["unresolved_proceeds"] == 4.2
     assert model["research"]["C"]["known_open"] is None
     assert model["research"]["B"]["known_value_fraction"] is None
+
+
+def test_inventory_and_timing_use_latest_inspected_wallet(tmp_path):
+    samples = dict(evaluated=9, mature_trades=18, favorable=9,
+                   trade_days=2, quote_coverage=.5)
+    paths = []
+    for name, stamp, inspected, profile in [
+        ("old", "2026-01-01T00:00:00Z", True,
+         dict(current_inventory=True, balance_tao=50,
+              positions=[dict(netuid=24, alpha=3)],
+              timing={"buy": dict(samples, evaluated=3)})),
+        ("new", "2026-01-02T00:00:00Z", True,
+         dict(current_inventory=True, balance_tao=.01,
+              balance_fetched_at="2026-01-02T00:00:00Z", positions=[],
+              timing={"buy": samples}, ranks={"buy": 1})),
+        ("uninspected", "2026-01-03T00:00:00Z", False,
+         dict(current_inventory=False, balance_tao=None, positions=[],
+              timing={"buy": dict(samples, evaluated=0)})),
+    ]:
+        path = tmp_path / (name + ".json")
+        path.write_text(json.dumps(dict(
+            checked_at=stamp,
+            coverage={"A": {"account": "complete"}} if inspected else {},
+            performance={"wallets": [dict(profile, address="A")]})))
+        paths.append(path)
+    research, _ = viewer._research(paths, set())
+    a = research["A"]
+    assert a["stamp"] == "2026-01-02T00:00:00Z"
+    assert a["current_inventory"] is True and a["held"] == []
+    assert a["balance_tao"] == .01
+    assert a["balance_fetched_at"] == a["stamp"]
+    assert a["timing"]["buy"] == samples
+    uninspected = viewer._new()
+    assert uninspected["current_inventory"] is False
+    assert uninspected["balance_tao"] is None
+    assert uninspected["timing"] == {}

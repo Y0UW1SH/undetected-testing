@@ -58,7 +58,7 @@ dialog::backdrop{background:rgba(17,37,29,.37)}dialog .field{margin:15px 0 8px}.
 <details class="scope"><summary>Why do reports show fewer wallets?</summary><p>The wallet report opens one scan. A wallet only appears in a ranking when its history supports that flag. This list combines the downloaded scans. Searching the Taostats directory also finds addresses whose trades we haven't inspected yet.</p></details>
 <div class="tabs" aria-label="Monitoring filter"><button class="tab" data-scope="all" aria-pressed="true">All wallets</button><button class="tab" data-scope="watching" aria-pressed="false">Watching</button><button class="tab" data-scope="muted" aria-pressed="false">Muted</button></div>
 <div class="filters"><label class="field search">Find wallet<input id="query" type="search" placeholder="Address, prefix or private label" autocomplete="off" spellcheck="false"></label>
-<label class="field">Evidence<select id="filter"><option value="all">All evidence</option><option value="inspected">History inspected</option><option value="uninspected">History uninspected</option><option value="profit_rank">Realized P/L ranked</option><option value="open_rank">Open P/L ranked</option><option value="buy_rank">Buy timing ranked</option><option value="sell_rank">Sell timing ranked</option><option value="gaps">Evidence gaps</option><option value="screens">Screened out</option></select></label>
+<label class="field">Evidence<select id="filter"><option value="all">All evidence</option><option value="inspected">History inspected</option><option value="uninspected">History uninspected</option><option value="profit_rank">Realized P/L ranked</option><option value="open_rank">Open P/L ranked</option><option value="buy_rank">Historical buy timing</option><option value="sell_rank">Historical sell timing</option><option value="gaps">Evidence gaps</option><option value="screens">Screened out</option></select></label>
 <label class="field">Sort by<select id="sort"><option value="research">Research first</option><option value="both">Known realized + open P/L</option><option value="known_realized">Known realized P/L</option><option value="known_open">Known open P/L</option><option value="checked_at">Latest inspection</option><option value="address">Address</option></select></label></div>
 <p id="list-status" class="caption listmsg" aria-live="polite"></p>
 <div class="tablewrap"><table><thead><tr><th>Wallet</th><th>Evidence</th><th class="right">Realized TAO</th><th>Monitoring</th></tr></thead><tbody id="rows"></tbody></table></div>
@@ -229,12 +229,27 @@ function select(w,move){
     'P/L covers units with a known acquisition cost. Missing data is shown as unknown.';
   ui.evidence.replaceChildren();
   const ranks=node('div',undefined,'ranks');
-  for(const [k,name] of [['profit_rank','Realized P/L'],['open_rank','Open P/L'],['buy_rank','Buy timing'],['sell_rank','Sell timing']]){
+  for(const [k,name] of [['profit_rank','Realized P/L'],['open_rank','Open P/L'],['buy_rank','Historical buy timing'],['sell_rank','Historical sell timing']]){
     ranks.append(node('span',name+' · '+(number(w[k])?'#'+w[k]:ranked(w[k])?'Ranked':'Unranked')));
   }
   ui.evidence.append(node('h3','Scan rankings'),ranks);
+  const timing=[];
+  for(const side of ['buy','sell']){
+    const sample=w.timing?.[side];
+    if(!ranked(w[side+'_rank'])||!sample)continue;
+    timing.push(format(sample.evaluated)+' of '+format(sample.mature_trades)+' eligible '+side+'s evaluated across '+
+      format(sample.trade_days)+' trading dates; '+format(sample.favorable)+' favorable; '+pct(sample.quote_coverage)+' quote coverage.');
+  }
+  if(timing.length){
+    evidenceBlock('Historical timing sample',timing);
+    ui.evidence.append(node('p','These flags compare past trades with prices 24–30 hours later. They are not current trading signals.','caption'));
+  }
+  if(number(w.balance_tao)){
+    const balance=w.balance_tao.toLocaleString(undefined,{maximumFractionDigits:8});
+    ui.evidence.append(node('p','Saved account value: '+balance+' TAO · '+day(w.balance_fetched_at),'caption'));
+  }
   if(w.positions?.length){
-    ui.evidence.append(node('h3','Held subnet positions'));
+    ui.evidence.append(node('h3','Subnet holdings at last inspection'));
     const pos=node('ul');
     for(const p of w.positions){
       const price=v=>number(v)?v.toLocaleString(undefined,{maximumFractionDigits:8}):'unknown';
@@ -244,6 +259,10 @@ function select(w,move){
         price(p.current_quote?p.price_tao:null)+' TAO/α'));
     }
     ui.evidence.append(pos);
+  }else{
+    ui.evidence.append(node('p',w.current_inventory===true?
+      'No subnet holdings at last inspection · '+day(w.checked_at):
+      'Current subnet holdings are unconfirmed.','caption'));
   }
   if(w.examples?.length){
     ui.evidence.append(node('h3','Recent trade receipts'));

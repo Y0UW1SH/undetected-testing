@@ -53,8 +53,11 @@ def add_parser(sub):
                       help="skip market discovery and inspect supplied or "
                       "followed addresses and their transfer peers")
     mode.add_argument("--holders-only", action="store_true",
-                      help="sample subnet holders without rescanning unrelated"
-                      " traders, metagraphs or the existing watchlist")
+                      help="resume holder pages and inspect queued wallets "
+                      "without unrelated metagraphs or watchlist refreshes")
+    p.add_argument("--holder-pages", type=_number, default=4,
+                   help="consecutive holder pages per subnet in holders-only "
+                   "mode (1-100); resumes from saved progress")
     p.add_argument("--new-wallets", type=_number, default=10,
                    help="maximum extra recipient accounts per run")
     p.add_argument("--link-depth", type=_number, default=2,
@@ -263,6 +266,29 @@ def _discover(args, session, store, stamp, coverage, holders, origins):
         netuids = [p.netuid for p in prices if p.netuid != 0]
         netuids = netuids[:args.subnets or None]
     neurons = []
+    if args.holders_only:
+        from seo.sources import tao_holder_registry
+        from seo import tao_holder_queue
+        tao_holder_registry.schema(store.conn)
+        tao_holder_queue.schema(store.conn)
+        for n in netuids:
+            info = tao_holder_registry.collect_pages(
+                session, store.conn, n, stamp, pages=args.holder_pages)
+            holders[n] = info
+            print("SN%d: %d captured holders; next page %s (%s)" % (
+                n, info["captured"], info.get("next_page"), info["status"]),
+                flush=True)
+        selected = tao_holder_queue.select(
+            store.conn, netuids, args.top, stamp)
+        chosen = set(selected)
+        for n, a in store.conn.execute(
+                "SELECT netuid,address FROM holder_registry"):
+            if n in netuids and a in chosen:
+                origins[a].add("Taostats holders: SN%d" % n)
+        counts = tao_holder_queue.summary(store.conn, netuids, stamp)
+        print("Holder research queue: %s; selected %d wallets" % (
+            counts, len(selected)), flush=True)
+        return dict.fromkeys(selected), "skipped"
     from seo.sources.tao_holders import fetch_holders
     held = []
     for n in netuids:
@@ -286,9 +312,6 @@ def _discover(args, session, store, stamp, coverage, holders, origins):
               % (n, graph, len(investor), state), flush=True)
     investors = iter(dict.fromkeys(a for group in zip_longest(*held)
                                    for a in group if a))
-    if args.holders_only:
-        selected = list(investors)[:args.top or None]
-        return dict.fromkeys(selected), "skipped"
     earners = site.earners(neurons)
     ranked = wallets.pick_candidates(earners, args.top or len(earners))
     session.pause()
@@ -424,6 +447,8 @@ def collect(args, store):
         raise SystemExit("--history-pages must be at least 1")
     if args.history_charts > 12:
         raise SystemExit("--history-charts must be between 0 and 12")
+    if not 1 <= args.holder_pages <= 100:
+        raise SystemExit("--holder-pages must be between 1 and 100")
     if min(args.min_sales, args.min_timing) < 1:
         raise SystemExit("--min-sales and --min-timing must be at least 1")
     if len(args.extrinsic) > 5:
@@ -464,6 +489,13 @@ def collect(args, store):
             status = coverage[address] = {}
             snap, rows = _inspect(args, session, store, address,
                                   earners.get(address), stamp, status)
+            if args.holders_only:
+                from seo import tao_holder_queue
+                if (snap and args.max_balance_tao
+                        and snap.balance_total is not None
+                        and snap.balance_total > args.max_balance_tao):
+                    status["screened"] = True
+                tao_holder_queue.record(store.conn, {address: status}, stamp)
             print("%s %s" % (address, status), flush=True)
             if not snap:
                 continue
@@ -586,6 +618,11 @@ def collect(args, store):
                   unpriced_sales={a: s["unpriced_sales"] for a, s
                                   in stats.items() if s["unpriced_sales"]},
                   following=following)
+    if args.holders_only:
+        from seo import tao_holder_queue
+        report["holder_queue"] = tao_holder_queue.summary(
+            store.conn, list(holders), stamp)
+        report["holder_queue"]["selected_this_run"] = len(earners)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w", encoding="utf8") as f:
         json.dump(report, f, indent=2)
@@ -600,4 +637,9 @@ def collect(args, store):
             print("::warning::%d wallet history tabs unavailable." % missing)
     have_accounts = any(c.get("account") == "complete"
                         for c in coverage.values())
-    return 0 if have_accounts else 1
+    # Discovery can make durable progress even while all remaining wallets
+    # are on retry delay, or after the research queue has been exhausted.
+    holder_progress = args.holders_only and any(
+        h.get("pages_read", 0) > 0 or h.get("status") == "traversed_live"
+        for h in holders.values())
+    return 0 if have_accounts or holder_progress else 1

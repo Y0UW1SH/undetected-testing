@@ -27,6 +27,8 @@ def _new():
                 unpriced_sales=0, known_realized=None, known_open=None,
                 known_value_fraction=None, unresolved_proceeds=None,
                 screen_status="unassessed", win_rate=None,
+                current_inventory=False, balance_tao=None,
+                balance_fetched_at=None, timing={},
                 stamp=None, coverage={}, in_directory=False)
 
 
@@ -124,7 +126,16 @@ def _research(paths, cached):
             held = [{k: p.get(k) for k in position_fields} for p in positions
                     if wallet.get("current_inventory") and p.get("netuid")
                     and (p.get("alpha") or 0) > 0]
+            timing_fields = ("evaluated", "mature_trades", "favorable",
+                             "trade_days", "quote_coverage")
+            timing = {side: {k: sample.get(k) for k in timing_fields}
+                      for side, sample in (wallet.get("timing") or {}).items()
+                      if side in ("buy", "sell")}
             w.update(stamp=stamp, subnets=subnets, held=held,
+                     current_inventory=wallet.get("current_inventory") is True,
+                     balance_tao=wallet.get("balance_tao"),
+                     balance_fetched_at=wallet.get("balance_fetched_at"),
+                     timing=timing,
                      known_realized=known,
                      known_open=opened, known_value_fraction=fraction,
                      unresolved_proceeds=wallet.get(

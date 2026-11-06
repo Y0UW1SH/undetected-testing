@@ -134,7 +134,8 @@ def _read(session, netuid, page):
     while waited < limit:
         state = session.sb.evaluate(js) or {}
         diag = state.get("diagnostic") or {}
-        if state.get("status") == "success":
+        if (state.get("status") == "success"
+                and diag.get("fetch_status") not in ("fetching", "paused")):
             data = state.get("data")
             if (isinstance(data, dict) and isinstance(data.get("data"), list)
                     and str((data.get("pagination") or {}).get(

@@ -98,7 +98,17 @@ def test_batch_without_config_explains(fake_env, capsys):
     assert "seo init" in capsys.readouterr().err
 
 
-def test_report_renders_everything(fake_env, capsys):
+def test_report_renders_everything(fake_env, capsys, monkeypatch):
+    # This tests rendering one fixture batch, not the wall-clock boundary
+    # between individual records created by the fixture parser.
+    stamp = models.datetime.now(models.timezone.utc)
+
+    class Clock:
+        @staticmethod
+        def now(tz):
+            return stamp
+
+    monkeypatch.setattr(models, "datetime", Clock)
     store = storage.Storage(fake_env["db"])
     html = report.render(store)
     assert "No data yet" in html

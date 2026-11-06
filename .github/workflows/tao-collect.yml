@@ -39,9 +39,13 @@ on:
         type: boolean
         default: false
       holders_only:
-        description: "Focus on actual subnet holders; skip unrelated metagraphs, traders and watchlist"
+        description: "Resume holder pages and research new queued wallets across the chosen subnets"
         type: boolean
         default: false
+      holder_pages:
+        description: "Consecutive holder pages per subnet (1-100); saved progress resumes next run"
+        type: string
+        default: "4"
       new_wallets:
         description: "Maximum extra recipient accounts to inspect this run"
         type: string
@@ -134,6 +138,7 @@ jobs:
         run: python -m pip install -r requirements.txt
 
       - name: Collect wallet and subnet data
+        id: collect
         if: steps.watchlist.outputs.skip != 'true'
         env:
           NETUIDS: ${{ inputs.netuids }}
@@ -143,6 +148,7 @@ jobs:
           WATCH_ADDRESSES: ${{ inputs.watch_addresses }}
           ADDRESSES_ONLY: ${{ github.event_name == 'schedule' || inputs.addresses_only }}
           HOLDERS_ONLY: ${{ inputs.holders_only }}
+          HOLDER_PAGES: ${{ inputs.holder_pages || '4' }}
           EXTRINSICS: ${{ inputs.extrinsics }}
           NEW_WALLETS: ${{ inputs.new_wallets || '2' }}
           HISTORY_PAGES: ${{ inputs.history_pages || '4' }}
@@ -155,7 +161,7 @@ jobs:
                 --history-pages "$HISTORY_PAGES" --follow-top "$FOLLOW_TOP"
                 --out "$REPORT")
           if [[ "$ADDRESSES_ONLY" == "true" ]]; then args+=(--addresses-only --history-charts 2); fi
-          if [[ "$HOLDERS_ONLY" == "true" ]]; then args+=(--holders-only --history-charts 2); fi
+          if [[ "$HOLDERS_ONLY" == "true" ]]; then args+=(--holders-only --holder-pages "$HOLDER_PAGES" --history-charts 8); fi
           if [[ -n "$NETUIDS" ]]; then args+=(--netuids "$NETUIDS"); fi
           if [[ -n "$ADDRESSES" ]]; then
             IFS=, read -ra addresses <<< "$ADDRESSES"
@@ -216,6 +222,13 @@ jobs:
                     f"and attempted {len(coverage)} wallet accounts.\n", file=out)
               print(f"Recent trade discovery: {report['recent_trades_status']}. "
                     f"Deferred recipients: {len(report['deferred_recipients'])}.\n", file=out)
+              queue = report.get("holder_queue")
+              if queue:
+                  print("\n### Holder research coverage\n", file=out)
+                  print("Holder addresses are candidates, not verified profitable traders. "
+                        "Pages resume and wallets are deduplicated across runs.\n", file=out)
+                  for name, value in queue.items():
+                      print(f"- {name.replace('_', ' ')}: {value}", file=out)
               print("| Page | Complete | Partial | Unavailable | Skipped | Rows this run |", file=out)
               print("| --- | ---: | ---: | ---: | ---: | ---: |", file=out)
               for tab in ("transactions", "transfers"):
@@ -254,7 +267,9 @@ jobs:
               append_summary(report, out)
 
       - name: Save wallet history
-        if: steps.watchlist.outputs.skip != 'true'
+        # Keep verified holder pages and retry timestamps even when every
+        # wallet tab was unavailable. The collection still reports failure.
+        if: ${{ !cancelled() && (steps.collect.outcome == 'success' || steps.collect.outcome == 'failure') }}
         shell: bash
         run: |
           state=$(dirname "$TAO_DB")
@@ -287,6 +302,9 @@ jobs:
           import os
           from pathlib import Path
           report = json.loads(Path(os.environ["REPORT"]).read_text())
-          for tab in ("transactions", "transfers"):
-              if not any(c.get(tab) == "complete" or c.get(tab + "_rows", 0) for c in report["coverage"].values()):
-                  raise SystemExit(f"No wallet returned readable {tab}. The artifact preserves partial data.")
+          if not report["coverage"] and "holder_queue" in report:
+              print("Holder discovery saved. No wallets were eligible for history inspection this run.")
+          else:
+              for tab in ("transactions", "transfers"):
+                  if not any(c.get(tab) == "complete" or c.get(tab + "_rows", 0) for c in report["coverage"].values()):
+                      raise SystemExit(f"No wallet returned readable {tab}. The artifact preserves partial data.")

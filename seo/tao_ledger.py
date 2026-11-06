@@ -192,6 +192,7 @@ def inferred_links(checkpoints, events):
     An observed trade or transfer on either side suppresses inference.
     Unconfirmed matches require both prior positions, intersecting time
     intervals and a unique, closely matched quantity in each direction.
+    Scoped checkpoints are not complete account inventories and are ignored.
     """
     activity = defaultdict(list)
     for e in events:
@@ -202,7 +203,8 @@ def inferred_links(checkpoints, events):
         times.sort()
     changes = defaultdict(list)
     previous, first = {}, {}
-    dated = (dict(p, time=_parse_ts(p["time"])) for p in checkpoints)
+    dated = (dict(p, time=_parse_ts(p["time"])) for p in checkpoints
+             if "netuid_scope" not in p)
     for p in sorted(dated, key=lambda x: (x["time"], x["address"])):
         addr = p["address"]
         first.setdefault(addr, p)
@@ -308,32 +310,38 @@ def _opening_inventory(timeline):
     # observed movements and the first inventory. This includes unknown
     # stake that was sold or transferred before the first snapshot.
     lots = defaultdict(_Holding)
-    net, minimum, seen = defaultdict(float), defaultdict(float), set()
+    net, minimum = defaultdict(float), defaultdict(float)
+    seen_all, seen_keys = set(), set()
     for _, is_snapshot, e in timeline:
         if is_snapshot:
             addr = e["address"]
-            if addr in seen:
+            if addr in seen_all:
                 continue
-            keys = {(a, n) for a, n in net if a == addr}
-            keys.update((addr, n) for n in e["units"])
-            for key in keys:
+            if "netuid_scope" in e:
+                keys = {(addr, n) for n in e["netuid_scope"]}
+            else:
+                keys = {(a, n) for a, n in net if a == addr}
+                keys.update((addr, n) for n in e["units"])
+                seen_all.add(addr)
+            for key in keys - seen_keys:
                 lots[key].alpha = max(-minimum[key],
                                       e["units"].get(key[1], 0) - net[key])
-            seen.add(addr)
+            seen_keys.update(keys)
         elif e["alpha"]:
             src, dst = _inventory_endpoints(e)
-            if e["kind"] == "stake_reallocation" and src not in seen:
-                key = src, e["netuid"]
+            key = src, e["netuid"]
+            if (e["kind"] == "stake_reallocation" and src not in seen_all
+                    and key not in seen_keys):
                 minimum[key] = min(minimum[key], net[key] - e["alpha"])
             if src == dst:
                 continue
             for addr, sign in ((src, -1), (dst, 1)):
-                if addr and addr not in seen:
-                    key = addr, e["netuid"]
+                key = addr, e["netuid"]
+                if addr and addr not in seen_all and key not in seen_keys:
                     net[key] += sign * e["alpha"]
                     minimum[key] = min(net[key], minimum[key])
     for key in net:
-        if key[0] not in seen:
+        if key[0] not in seen_all and key not in seen_keys:
             lots[key].alpha = -minimum[key]
     return lots
 
@@ -449,7 +457,8 @@ def _transfer_receipt(e, part):
 def portfolio(events, checkpoints, *, subnet_stats=None, sale_details=None,
               transfer_details=None):
     """Replay once; optionally write the per-wallet/subnet sale breakdown
-    into the supplied mapping."""
+    into the supplied mapping. A checkpoint with ``netuid_scope`` observes
+    only those assets; an omitted scope observes the complete account."""
     events = sorted(events, key=_chain_order)
     timeline = [(_parse_ts(e["time"]), False, e) for e in events]
     timeline.extend((_parse_ts(p["time"]), True, p) for p in checkpoints)
@@ -463,7 +472,8 @@ def portfolio(events, checkpoints, *, subnet_stats=None, sale_details=None,
     for _, is_snapshot, e in timeline:
         if is_snapshot:
             addr = e["address"]
-            nets = set(e["units"]) | {n for a, n in lots if a == addr}
+            nets = (set(e["netuid_scope"]) if "netuid_scope" in e else
+                    set(e["units"]) | {n for a, n in lots if a == addr})
             for n in nets:
                 lots[addr, n].observe(e["units"].get(n, 0))
             continue
