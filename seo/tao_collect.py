@@ -8,6 +8,7 @@ from collections import defaultdict, deque
 from datetime import timedelta
 from itertools import zip_longest
 from pathlib import Path
+from typing import NamedTuple
 
 from seo import cli, tao_ledger, tao_wallets as wallets
 from seo.models import ChallengeError
@@ -106,6 +107,102 @@ def _cache_call(db, saved, detail):
                    (xid, json.dumps(detail)))
 
 
+class _Flow(NamedTuple):
+    wallet: str
+    netuid: int
+    before: int
+    alpha: float
+    tao: float
+
+
+def _donors(incoming, wallet, downstream=None):
+    """Largest corroborated incoming flows per donor/subnet, capped per hop."""
+    best = {}
+    for index, e in incoming.get(wallet, ()):
+        if downstream and (index >= downstream.before
+                           or e["netuid"] != downstream.netuid):
+            continue
+        units = e["alpha"]
+        if downstream:
+            units = min(units, downstream.alpha)
+        value = (e.get("tao") or 0.) * units / e["alpha"]
+        if downstream and downstream.tao:
+            cap = downstream.tao * units / downstream.alpha
+            value = min(value, cap) if value else cap
+        flow = _Flow(e["src"], e["netuid"], index, units, value)
+        key = flow.wallet, flow.netuid
+        weight = flow.tao, flow.alpha, flow.before
+        if key not in best or weight > best[key][0]:
+            best[key] = weight, flow
+    return [flow for _, flow in sorted(best.values(), reverse=True)[:6]]
+
+
+def _receipt_order(events, missing, watched, limit=24):
+    """Order move receipts by stake that could reach a followed wallet."""
+    if not missing:
+        return []
+    incoming, moves = defaultdict(list), defaultdict(list)
+    direct, upstream, newest, owners = {}, {}, {}, {}
+    # net_transfers returns a stable chain order. An index permits a strict
+    # cutoff even for two events in the same block or extrinsic.
+    for index, e in enumerate(events):
+        xid = e.get("extrinsic")
+        if e["kind"] == "stake_reallocation" and xid in missing:
+            newest[xid] = index
+            owners[xid] = e["src"]
+            if (e.get("alpha") or 0.) <= 0:
+                continue
+            moves[e["src"], e["netuid"]].append((index, e))
+            if e["src"] in watched:
+                direct[xid] = max(direct.get(xid, 0.), e.get("tao") or 0.)
+        elif (e["kind"] == "stake_transfer" and e["evidence"] == "transaction"
+              and e["src"] and e["dst"] and e["src"] != e["dst"]
+              and e.get("transfer_side") not in {"out", "in", "unknown"}
+              and e.get("dst_netuid") in (None, e.get("netuid"))
+              and e.get("netuid") and (e.get("alpha") or 0.) > 0):
+            incoming[e["dst"]].append((index, e))
+
+    flows = [flow for wallet in sorted(watched)
+             for flow in _donors(incoming, wallet)]
+    for hop in range(2):
+        # One busy recipient cannot make the collector walk an entire graph.
+        # Keep earlier ancestry separate by subnet, time and amount.
+        paths = sorted(flows, key=lambda f: (f.tao, f.alpha, f.before),
+                       reverse=True)[:limit]
+        flows = []
+        for path in paths:
+            for index, e in moves.get((path.wallet, path.netuid), ()):
+                if index >= path.before:
+                    continue
+                units = min(e["alpha"], path.alpha)
+                value = (path.tao * units / path.alpha if path.tao else
+                         (e.get("tao") or 0.) * units / e["alpha"])
+                xid = e["extrinsic"]
+                upstream[xid] = max(upstream.get(xid, 0.), value)
+            if hop == 0:
+                flows.extend(_donors(incoming, path.wallet, path))
+
+    def order(scores):
+        return sorted(scores, key=lambda x: (scores[x], newest[x], x),
+                      reverse=True)
+
+    # Reserve room for both inherited cost and the watched wallets' own moves.
+    half = limit // 2
+    ancestry = []
+    per_donor = defaultdict(int)
+    for xid in order(upstream):
+        donor = owners[xid]
+        if per_donor[donor] < 4:
+            ancestry.append(xid)
+            per_donor[donor] += 1
+    watched_moves = order(direct)
+    remaining = sorted(missing, key=lambda x: (newest.get(x, -1), x),
+                       reverse=True)
+    preferred = ancestry[:half] + watched_moves[:limit - half]
+    return list(dict.fromkeys(preferred + ancestry + watched_moves
+                              + remaining))[:limit]
+
+
 def _read(store, session=None, explicit=()):
     events = [json.loads(r[0]) for r in store.conn.execute(
         "SELECT payload FROM wallet_events")]
@@ -120,15 +217,17 @@ def _read(store, session=None, explicit=()):
                "(extrinsic TEXT PRIMARY KEY, payload TEXT NOT NULL)")
     saved = {r[0]: json.loads(r[1]) for r in db.execute(
         "SELECT extrinsic,payload FROM wallet_move_evidence")}
+    requested = set()
     for detail in explicit:
+        requested.add(detail["extrinsic_id"])
         _cache_call(db, saved, detail)
-    candidates = tao_ledger.matching_reallocation_ids(events)
+    normalized = tao_ledger.net_transfers(events)
+    candidates = {e["extrinsic"] for e in normalized
+                  if e.get("evidence") == "matching_trade_legs"}
     if session:
         watched = {r["address"] for r in store.followed()}
-        priority = {e.get("extrinsic") for e in events if e["src"] in watched}
-        missing = sorted(candidates - set(saved),
-                         key=lambda x: (x in priority, x), reverse=True)
-        for xid in missing[:24]:
+        missing = candidates - set(saved) - requested
+        for xid in _receipt_order(normalized, missing, watched):
             try:
                 item = tao_extrinsic.fetch_evidence(session, xid)
             except (ValueError, ChallengeError):
@@ -138,7 +237,8 @@ def _read(store, session=None, explicit=()):
                 if tao_extrinsic.confirms_reallocation(
                     saved[xid], [e for e in events if e["kind"] == "sell"
                                  and e.get("extrinsic") == xid])}
-    normalized = tao_ledger.net_transfers(events, verified_moves=verified)
+    if verified:
+        normalized = tao_ledger.net_transfers(events, verified_moves=verified)
     return normalized, checkpoints
 
 
