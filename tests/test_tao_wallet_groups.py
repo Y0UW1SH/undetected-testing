@@ -264,3 +264,17 @@ def test_unknown_cost_is_not_reported_as_a_known_zero_subtotal():
     economics = grouping.build_groups([data])["groups"][0]["economics"]
     assert economics["known_cost_subtotal_tao"] is None
     assert economics["known_unrealized_subtotal_tao"] is None
+
+
+def test_unknown_liquidation_cost_preserves_only_known_group_subtotals():
+    unknown = wallet("B", unpriced_sales=0, unpriced_liquidations=1,
+                     economic_realized_tao=None, known_realized_tao=3)
+    data = report(events=[transfer()], wallets=[wallet("A", realized=2),
+                                                unknown])
+    economics = grouping.build_groups([data])["groups"][0]["economics"]
+    assert economics["status"] == "partial"
+    assert economics["fully_costed_members"] == 1
+    assert economics["coverage_fraction"] == .5
+    assert economics["known_realized_subtotal_tao"] == 5
+    assert economics["realized_tao"] is None
+    assert economics["total_pnl_tao"] is None and not economics["rankable"]

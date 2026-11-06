@@ -241,7 +241,8 @@ jobs:
               print("Fetched rows include recent-page refresh and overlap. Stored rows are "
                     "deduplicated table records, not independent winning trades. Partial "
                     "history remains queued for older-page research; missing source totals "
-                    "are unknown. Complete means observed explorer history, not a full "
+                    "are unknown. Remaining counts rows absent from storage; zero may still "
+                    "need older-page verification. Complete means observed explorer history, not a full "
                     "native-chain audit.\n", file=out)
               print("| Wallet | Table | Fetched | New | Stored | Source total | Remaining | Status |", file=out)
               print("| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |", file=out)

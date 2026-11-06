@@ -1,4 +1,6 @@
 """The wallet tabs paginate independently and may fail before any rows load."""
+import json
+
 from seo.sources import tao_history as history
 
 WALLET = "5FUcTAuTxS5iS7FyP3CwHee53m3mtYYTVS9hJukfZF5hC8KU"
@@ -12,6 +14,15 @@ def trade(i):
             "nominator": {"ss58": WALLET}, "delegate": {"ss58": PEER},
             "amount": "7092857", "alpha": "135443860", "netuid": 68,
             "is_transfer": None, "transfer_address": None}
+
+
+def liquidation():
+    return dict(
+        id=f'sn-liquidation-36-8884353-{WALLET}-{PEER}', extrinsic_id='',
+        block_number=8884353, timestamp='2026-08-20T06:56:36Z',
+        action='UNDELEGATE', amount='9972836140', alpha='7205837776059',
+        netuid=36, nominator={'ss58': WALLET}, delegate={'ss58': PEER},
+        is_transfer=False)
 
 
 def page(items, number, count):
@@ -51,6 +62,55 @@ def test_missing_numeric_fields_never_become_zero_price_or_nan():
     for bad in [None, "NaN", "Infinity", "bad", "-1"]:
         item = dict(trade(1), amount=bad)
         assert history.normalize(item, "transactions", WALLET) is None
+
+
+def test_liquidation_without_extrinsic_preserves_typed_source_evidence():
+    raw = liquidation()
+    event = history.normalize(raw, 'transactions', WALLET)
+    assert event['kind'] == 'subnet_liquidation'
+    assert event['extrinsic'] is None and event['block_number'] == 8884353
+    assert event['tao'] == 9.97283614 and event['alpha'] == 7205.837776059
+    assert event['netuid'] == 36
+    assert event['src'] == event['owner'] == WALLET
+    assert event['dst'] is None and event['transfer_side'] is None
+    assert event['evidence'] == 'taostats_subnet_liquidation'
+    assert event['source_event_id'] == raw['id']
+    assert event['forced_disposal'] is True
+    assert event['trading_eligible'] is False
+    assert json.loads(event['id']) == ['transactions', None, WALLET, raw['id']]
+    assert history.normalize(dict(raw, extrinsic_id=None), 'transactions',
+                             WALLET)['id'] == event['id']
+
+
+def test_liquidation_requires_exact_id_fields_and_valid_amounts():
+    raw = liquidation()
+    changes = [dict(id=raw['id'].replace('-36-', '-35-')),
+               dict(block_number=8884354), dict(netuid=35),
+               dict(nominator={'ss58': PEER}), dict(delegate={'ss58': WALLET}),
+               dict(action='DELEGATE'), dict(is_transfer=True),
+               dict(extrinsic_id='8884353-0001'), dict(amount='-1'),
+               dict(amount=None), dict(amount='NaN'), dict(alpha='0'),
+               dict(alpha='-1'), dict(block_number=None), dict(netuid=True)]
+    for change in changes:
+        assert history.normalize(dict(raw, **change), 'transactions',
+                                 WALLET) is None, change
+    assert history.normalize(raw, 'transfers', WALLET) is None
+
+
+def test_explicit_zero_liquidation_payout_is_not_a_zero_price_trade():
+    event = history.normalize(dict(liquidation(), amount='0'),
+                              'transactions', WALLET)
+    assert event['kind'] == 'subnet_liquidation' and event['tao'] == 0
+    assert event['alpha'] > 0 and event['trading_eligible'] is False
+    assert history.normalize(dict(trade(1), amount='0'),
+                             'transactions', WALLET) is None
+
+
+def test_generic_missing_extrinsic_does_not_become_a_liquidation():
+    assert history.normalize(dict(trade(1), extrinsic_id=''),
+                             'transactions', WALLET) is None
+    assert history.normalize(dict(liquidation(), id='unrecognized-system-row'),
+                             'transactions', WALLET) is None
 
 
 def test_unusable_event_records_keep_the_rest_of_a_page():

@@ -368,3 +368,31 @@ def test_rejection_samples_are_bounded_and_never_echo_arbitrary_values():
     assert len(detail['rejected_rows']) == 3
     assert detail['samples_truncated'] is True
     assert 'private-' not in json.dumps(detail)
+
+
+def test_resumed_history_crosses_a_strictly_identified_liquidation_page():
+    peer = '5FtBncJvGhxjBs4aFn2pid6aur9tBUuo9QR7sHe5DkoRizzo'
+
+    def source():
+        table = Table(range(69, -1, -1))
+        table.rows[13].update(
+            id=f'sn-liquidation-36-8884353-{WALLET}-{peer}', extrinsic_id='',
+            block_number=8884353, action='UNDELEGATE', netuid=36,
+            amount='9972836140', alpha='7205837776059', is_transfer=False,
+            delegate={'ss58': peer})
+        return table
+
+    known, checkpoint = set(), None
+    disposals = {}
+    for _ in range(4):
+        events, status, info, _ = run(source(), checkpoint, known, pages=2)
+        known.update(row['id'] for row in events)
+        disposals.update((row['id'], row) for row in events
+                         if row['kind'] == 'subnet_liquidation')
+        checkpoint = info['checkpoint']
+        assert not info['row_validation']
+        if status == 'complete':
+            break
+    assert status == 'complete' and len(known) == 70
+    assert len(disposals) == 1 and info['remaining'] == 0
+    assert next(iter(disposals.values()))['extrinsic'] is None

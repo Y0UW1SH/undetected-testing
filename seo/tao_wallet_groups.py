@@ -219,6 +219,7 @@ def _wallet_metrics(wallet, coverage, stamp):
         current and all(coverage.get(k) == "complete" for k in
                         ("account", "transactions", "transfers"))
         and wallet.get("unpriced_sales") == 0 and realized is not None
+        and not wallet.get("unpriced_liquidations")
         and opened is not None
         and all(p.get("current_quote")
                 and _number(p.get("known_cost_tao")) is not None

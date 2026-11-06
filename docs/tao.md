@@ -108,6 +108,8 @@ performance, open the collector's `tao_collect.json` report.
   A saved count of 50 is not a claim that the wallet has only 50 transactions.
   Source completion requires a verified terminal page and matching unique row
   counts; it describes that explorer table, not an independent chain audit.
+  Remaining rows count source rows absent from storage. This can be zero while
+  older saved rows still await page-by-page continuity checks after migration.
   Partial histories remain eligible for later research. If the source changes
   unexpectedly, the collector preserves row facts and reports the gap instead
   of declaring completion.
@@ -136,6 +138,12 @@ performance, open the collector's `tao_collect.json` report.
   a stake move from a followed wallet can also join the watchlist after
   inspection and balance/activity screening. Pending recipients stay linked
   in the report without joining the watchlist.
+* Forced subnet liquidation is a separate disposal. Matching Taostats liquidation
+  rows can legitimately have no extrinsic ID because settlement happens in a
+  block hook. The ledger removes the affected alpha and records the payout
+  against its traceable cost, preserving unknown basis. These disposals affect
+  economic P/L but do not count as voluntary sales, trading wins or timely exits.
+  See [subnet deregistration](https://guides.learnbittensor.org/subnets/subnet-deregistration).
 * Trade timing compares a buy or sale with the first available subnet
   quote 24 to 30 hours later. A subsequent rise counts in favor of a buy,
   and a fall counts in favor of a sale. `evaluated` is the number with a

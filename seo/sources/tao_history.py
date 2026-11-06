@@ -152,12 +152,55 @@ def _rejected(rejection, reason):
     return None
 
 
+def _liquidation(raw, tab, address, when, rejection):
+    """Recognize only the observed Taostats automatic-liquidation schema.
+
+    These finalization records have no signed extrinsic. The source's exact
+    identity binds subnet, block, owner and delegate; it is not native proof.
+    """
+    identity = raw['id']
+    addr = r'5[1-9A-HJ-NP-Za-km-z]{45,47}'
+    match = re.fullmatch(
+        rf'sn-liquidation-([1-9][0-9]*)-([1-9][0-9]*)-({addr})-({addr})',
+        identity)
+    fields = {key: raw.get(key) for key in (
+        'netuid', 'block_number', 'amount', 'alpha')}
+    numeric = all(re.fullmatch(r'[0-9]+', str(value))
+                  for value in fields.values())
+    if (tab != 'transactions' or match is None or not numeric
+            or _ss58(raw.get('nominator')) != address
+            or match[3] != address
+            or match[4] != _ss58(raw.get('delegate'))
+            or int(match[1]) != int(fields['netuid'])
+            or int(match[2]) != int(fields['block_number'])):
+        return _rejected(rejection, 'liquidation_identity_mismatch')
+    if (raw.get('extrinsic_id') not in (None, '')
+            or str(raw.get('action')).lower() != 'undelegate'
+            or raw.get('is_transfer') is not False):
+        return _rejected(rejection, 'liquidation_shape_unsupported')
+    amount, alpha = _quantity(fields['amount']), _quantity(fields['alpha'])
+    if amount is None or alpha is None or alpha <= 0:
+        return _rejected(rejection, 'liquidation_amount_invalid')
+    key = (tab, None, address, identity)
+    return dict(id=json.dumps(key, separators=(',', ':')), time=when,
+                extrinsic=None, event_index=_index(raw), owner=address,
+                kind='subnet_liquidation', src=address, dst=None, alpha=alpha,
+                tao=amount, netuid=int(fields['netuid']), transfer_side=None,
+                evidence='taostats_subnet_liquidation',
+                source_event_id=identity,
+                block_number=int(fields['block_number']), forced_disposal=True,
+                trading_eligible=False)
+
+
 def normalize(raw, tab, address, *, rejection=None):
     """One movement from a table. TAO and alpha amounts are in base units."""
     if not isinstance(raw, dict):
         return _rejected(rejection, "row_not_object")
     when = timestamp(raw.get("timestamp"))
     extrinsic = raw.get("extrinsic_id")
+    if (when and isinstance(raw.get('id'), str)
+            and raw['id'].startswith('sn-liquidation-')):
+        return _liquidation(raw, tab, address, when, rejection)
     if not when or not extrinsic:
         return _rejected(rejection, "timestamp_invalid" if not when else
                          "extrinsic_missing")

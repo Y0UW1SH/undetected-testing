@@ -110,11 +110,23 @@ def _board_measured(run, board):
 
 def _partial_sales(row):
     if row.get("partial_sales"):
-        gain = _amount(row["known_realized_tao"], True)
+        gain = _amount(row.get("known_sale_realized_tao",
+                               row["known_realized_tao"]), True)
         unresolved = _amount(row["unresolved_sale_proceeds_tao"])
         print(f"  Confirmed sold units: realized {gain} TAO across fully "
               f"and partially priced sales. {unresolved} TAO of sale "
               "proceeds have unresolved cost.")
+
+
+def _liquidations(row):
+    if row.get("liquidations"):
+        proceeds = _amount(row.get("liquidation_proceeds_tao"))
+        known = _amount(row.get("known_liquidation_realized_tao"), True)
+        unresolved = row.get("unpriced_liquidations", 0)
+        print(f"  {row['liquidations']} forced subnet liquidations: "
+              f"{proceeds} TAO payout; economic P/L on known cost {known} "
+              f"TAO; {unresolved} with unresolved cost. "
+              "Excluded from voluntary sales, trading wins and timing.")
 
 
 def _growth_sales(row):
@@ -146,6 +158,7 @@ def _print_position(p):
           f"unrealized {_amount(p['gross_unrealized_tao'], True)} TAO")
     _partial_sales(p)
     _growth_sales(p)
+    _liquidations(p)
     if p.get("growth_alpha"):
         effective = _amount(p.get("effective_cost_per_alpha_tao"))
         print(f"  effective cost {effective} "
@@ -212,6 +225,7 @@ def _print_detail(wallet, stamp, past):
         print("No sales observed.")
     _partial_sales(wallet)
     _growth_sales(wallet)
+    _liquidations(wallet)
     if "gross_unrealized_tao" in wallet:
         unrealized = _amount(wallet["gross_unrealized_tao"], True)
         total = _amount(wallet.get("gross_total_pnl_tao"), True)

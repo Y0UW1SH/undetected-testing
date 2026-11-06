@@ -11,6 +11,10 @@ from seo.tao_wallets import _parse_ts
 def _chain_order(event):
     numbers = str(event.get("extrinsic", "")).split("-")
     sequence = tuple(int(n) for n in numbers if n.isdigit())
+    if event["kind"] == "subnet_liquidation":
+        # Automatic subnet settlement runs at block finalization, after
+        # that block's extrinsics; it has no user extrinsic of its own.
+        sequence = (event.get("block_number") or math.inf, math.inf)
     return (_parse_ts(event["time"]), sequence,
             int(event.get("event_index") or 0), event["id"])
 
@@ -481,7 +485,13 @@ def _sale_stats():
                 partial_sales=0, known_sale_proceeds_tao=0.,
                 known_sale_cost_tao=0., unresolved_sale_proceeds_tao=0.,
                 known_sales=0, growth_sales=0, growth_proceeds_tao=0.,
-                known_growth_proceeds_tao=0.)
+                known_growth_proceeds_tao=0., liquidations=0,
+                priced_liquidations=0, unpriced_liquidations=0,
+                partial_liquidations=0, known_liquidations=0,
+                liquidation_proceeds_tao=0.,
+                known_liquidation_proceeds_tao=0.,
+                known_liquidation_cost_tao=0.,
+                unresolved_liquidation_proceeds_tao=0.)
 
 
 def _record_sale(event, sold, totals):
@@ -515,7 +525,10 @@ def _record_sale(event, sold, totals):
         totals["unpriced_sales"] += 1
         totals["partial_sales"] += bool(share)
         status = "partially_priced" if share else "unpriced"
-    return dict(id=event["id"], time=event["time"],
+    return dict(id=event["id"], time=event["time"], kind=event["kind"],
+                forced_disposal=False, evidence=event.get("evidence"),
+                block_number=event.get("block_number"),
+                source_event_id=event.get("source_event_id"),
                 extrinsic=event.get("extrinsic"),
                 event_index=event.get("event_index"), address=event["src"],
                 netuid=event["netuid"], alpha=sold.alpha,
@@ -532,17 +545,49 @@ def _record_sale(event, sold, totals):
                 unresolved_proceeds_tao=unresolved, **sold.provenance_fields())
 
 
+def _record_liquidation(event, removed, totals):
+    # The same weighted cost allocation applies to forced settlement, but
+    # none of its proceeds or counts may become evidence of trading skill.
+    temporary = _sale_stats()
+    detail = _record_sale(event, removed, temporary)
+    totals["liquidations"] += 1
+    totals["priced_liquidations"] += detail["basis_status"] == "fully_priced"
+    for target, source in (
+            ("unpriced_liquidations", "unpriced_sales"),
+            ("partial_liquidations", "partial_sales"),
+            ("known_liquidations", "known_sales"),
+            ("known_liquidation_proceeds_tao", "known_sale_proceeds_tao"),
+            ("known_liquidation_cost_tao", "known_sale_cost_tao"),
+            ("unresolved_liquidation_proceeds_tao",
+             "unresolved_sale_proceeds_tao")):
+        totals[target] += temporary[source]
+    totals["liquidation_proceeds_tao"] += event["tao"]
+    return dict(detail, forced_disposal=True, trading_eligible=False,
+                known_trading_realized_tao=None)
+
+
 def _finish_sales(s):
     has_cost = s["known_sales"]
     pnl = s["known_sale_proceeds_tao"] - s["known_sale_cost_tao"]
-    s["known_realized_tao"] = round(pnl, 9) if has_cost else None
+    forced_pnl = (s["known_liquidation_proceeds_tao"]
+                  - s["known_liquidation_cost_tao"])
+    s["known_sale_realized_tao"] = round(pnl, 9) if has_cost else None
+    s["known_liquidation_realized_tao"] = (
+        round(forced_pnl, 9) if s["known_liquidations"] else None)
+    s["known_realized_tao"] = (
+        round(pnl + forced_pnl, 9) if has_cost or s["known_liquidations"]
+        else None)
     s["known_trading_realized_tao"] = (
         round(pnl - s["known_growth_proceeds_tao"], 9) if has_cost else None)
     s["economic_realized_tao"] = (
-        None if s["unpriced_sales"] else s["known_realized_tao"])
+        None if s["unpriced_sales"] or s["unpriced_liquidations"]
+        else s["known_realized_tao"])
     for key in ("realized_tao", "known_sale_proceeds_tao",
                 "known_sale_cost_tao", "unresolved_sale_proceeds_tao",
-                "growth_proceeds_tao", "known_growth_proceeds_tao"):
+                "growth_proceeds_tao", "known_growth_proceeds_tao",
+                "liquidation_proceeds_tao", "known_liquidation_proceeds_tao",
+                "known_liquidation_cost_tao",
+                "unresolved_liquidation_proceeds_tao"):
         s[key] = round(s[key], 9)
 
 
@@ -771,8 +816,10 @@ def portfolio(events, checkpoints, *, subnet_stats=None, sale_details=None,
         moved = _Holding(qty)
         if src:
             moved = lots[src, n].remove(qty)
-        if e["kind"] == "sell":
-            detail = _record_sale(e, moved, sales[src, n])
+        if e["kind"] in ("sell", "subnet_liquidation"):
+            record = (_record_liquidation if e["kind"] == "subnet_liquidation"
+                      else _record_sale)
+            detail = record(e, moved, sales[src, n])
             if sale_details is not None:
                 sale_details.append(detail)
         elif dst:

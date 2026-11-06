@@ -328,8 +328,8 @@ def _whole_wallet(positions, field, inventory_ok):
 
 
 def economic_realized(row):
-    """Include growth in sale P/L; missing acquisition cost stays unknown."""
-    if row["unpriced_sales"]:
+    """Include growth and forced settlement; missing cost stays unknown."""
+    if row["unpriced_sales"] or row.get("unpriced_liquidations"):
         return None
     for field in ("economic_realized_tao", "known_realized_tao"):
         if row.get(field) is not None:
@@ -390,7 +390,7 @@ def record_run(store, stamp, positions, stats, subnet_stats, events, prices,
         economic = economic_realized(totals)
         combined = None
         account_coverage = coverage.get(address, {})
-        if (unrealized is not None and not totals["unpriced_sales"]
+        if (unrealized is not None and economic is not None
                 and account_coverage.get("transactions") == "complete"):
             combined = economic + unrealized
         w = dict(address=address, **totals, positions=rows,
