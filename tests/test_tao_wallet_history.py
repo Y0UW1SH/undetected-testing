@@ -1,5 +1,6 @@
 """Resume verified account-table history without skipping moving pages."""
 import math
+import json
 import re
 
 from seo.sources import tao_history as history
@@ -311,3 +312,59 @@ def test_empty_after_nonempty_is_not_complete_on_a_changed_source():
     assert status == 'partial'
     assert info['remaining'] is None
     assert info['errors'] == ['pagination_changed_restart']
+
+
+def test_rejected_public_row_diagnostic_explains_stalled_page_safely():
+    table = Table(range(29, -1, -1))
+    table.rows[13].update(alpha='0', amount='0', cookies='secret-cookie',
+                          headers={'Authorization': 'secret-token'})
+    events, status, info, _ = run(table)
+    detail = info['row_validation'][0]
+    assert status == 'partial' and len(events) == 19
+    assert info['checkpoint']['frontier_page'] == 1
+    assert detail['page'] == 2
+    assert detail['expected_rows'] == detail['received_rows'] == 10
+    assert detail['normalized_rows'] == 9
+    assert detail['rejection_counts'] == {'alpha_non_positive': 1}
+    rejected = detail['rejected_rows'][0]
+    assert rejected['row_number'] == 4
+    assert rejected['reason'] == 'alpha_non_positive'
+    assert rejected['fields']['extrinsic_id'] == '16-0001'
+    assert rejected['fields']['alpha'] == '0'
+    assert rejected['fields']['amount'] == '0'
+    serialized = json.dumps(detail)
+    assert 'secret-' not in serialized and 'Authorization' not in serialized
+    assert history.normalize(table.rows[13], 'transactions', WALLET) is None
+
+
+def test_rejection_diagnostics_distinguish_duplicates_order_and_short_page():
+    duplicate = Table(range(29, -1, -1))
+    duplicate.rows[13] = duplicate.rows[12]
+    _, _, info, _ = run(duplicate)
+    detail = info['row_validation'][0]
+    assert detail['reasons'] == ['duplicate_event_ids']
+    assert detail['normalized_rows'] == 10
+    assert detail['unique_normalized_rows'] == 9
+    assert detail['duplicate_rows'][0]['row_number'] == 4
+    assert detail['duplicate_rows'][0]['first_row_number'] == 3
+
+    unordered = Table(range(29, -1, -1))
+    unordered.rows[12], unordered.rows[13] = (
+        unordered.rows[13], unordered.rows[12])
+    _, _, info, _ = run(unordered)
+    detail = info['row_validation'][0]
+    assert detail['reasons'] == ['timestamp_order_invalid']
+    assert detail['order_breaks'][0]['row_number'] == 4
+
+
+def test_rejection_samples_are_bounded_and_never_echo_arbitrary_values():
+    table = Table(range(29, -1, -1))
+    for row in table.rows[10:20]:
+        row.update(amount='https://private.invalid/?token=private-secret',
+                   nominator={'ss58': WALLET, 'name': 'private-name'})
+    _, _, info, _ = run(table)
+    detail = info['row_validation'][0]
+    assert detail['rejection_counts'] == {'trade_amount_invalid': 10}
+    assert len(detail['rejected_rows']) == 3
+    assert detail['samples_truncated'] is True
+    assert 'private-' not in json.dumps(detail)

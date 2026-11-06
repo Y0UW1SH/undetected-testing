@@ -146,31 +146,46 @@ def _index(raw):
     return 0
 
 
-def normalize(raw, tab, address):
+def _rejected(rejection, reason):
+    if rejection is not None:
+        rejection.append(reason)
+    return None
+
+
+def normalize(raw, tab, address, *, rejection=None):
     """One movement from a table. TAO and alpha amounts are in base units."""
     if not isinstance(raw, dict):
-        return None
+        return _rejected(rejection, "row_not_object")
     when = timestamp(raw.get("timestamp"))
     extrinsic = raw.get("extrinsic_id")
     if not when or not extrinsic:
-        return None
+        return _rejected(rejection, "timestamp_invalid" if not when else
+                         "extrinsic_missing")
     amount = _quantity(raw.get("amount"))
     alpha = netuid = side = None
     if tab == "transfers":
         src, dst = _ss58(raw.get("from")), _ss58(raw.get("to"))
         if not src or not dst or address not in (src, dst) or amount is None:
-            return None
+            reason = ("transfer_source_missing" if not src else
+                      "transfer_destination_missing" if not dst else
+                      "transfer_wallet_mismatch" if address not in (src, dst)
+                      else "transfer_amount_invalid")
+            return _rejected(rejection, reason)
         kind = "tao_transfer"
     else:
         owner = _ss58(raw.get("nominator"))
         if owner != address:
-            return None
+            return _rejected(rejection, "nominator_mismatch")
         action = str(raw.get("action")).lower()
         netuid = raw.get("netuid")
         alpha = _quantity(raw.get("alpha"))
         if (action not in ("delegate", "undelegate")
                 or not str(netuid).isdigit() or alpha is None or alpha <= 0):
-            return None
+            reason = ("unsupported_action" if action not in (
+                "delegate", "undelegate") else "netuid_invalid"
+                if not str(netuid).isdigit() else "alpha_invalid"
+                if alpha is None else "alpha_non_positive")
+            return _rejected(rejection, reason)
         netuid = int(netuid)
         incoming = action == "delegate"
         peer = _ss58(raw.get("transfer_address"))
@@ -182,7 +197,9 @@ def normalize(raw, tab, address):
         else:
             kind = "buy" if incoming else "sell"
             if amount is None or amount <= 0:
-                return None
+                return _rejected(rejection, "trade_amount_invalid"
+                                 if amount is None else
+                                 "trade_amount_non_positive")
     # Matching in/out legs have different event IDs in some extrinsics.
     # Retain both raw legs in storage; the ledger pairs them before replay.
     identity = raw.get("id") or raw.get("event_id")

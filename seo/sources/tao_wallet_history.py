@@ -7,6 +7,7 @@ The caller must commit returned events and the checkpoint in one transaction.
 ``complete`` describes the observed table, never an independent chain census.
 """
 from copy import deepcopy
+from collections import Counter
 import math
 import re
 import time
@@ -124,6 +125,97 @@ def _pagination_diagnostic(result):
     return dict(keys=keys, integer_fields=observed)
 
 
+def _public_row(raw):
+    """Only typed public chain fields, never arbitrary source payload data."""
+    if not isinstance(raw, dict):
+        return {'row_type': type(raw).__name__}
+    fields = {}
+    patterns = {
+        'id': r'[A-Za-z0-9_-]{1,256}',
+        'event_id': r'[A-Za-z0-9_-]{1,256}',
+        'extrinsic_id': r'(?:\d+-\d+|0x[0-9a-fA-F]{64})',
+        'action': r'[A-Za-z_]{1,48}',
+    }
+    numeric = ('amount', 'alpha', 'netuid', 'block_number', 'event_index')
+    addresses = ('nominator', 'delegate', 'from', 'to', 'transfer_address')
+    for key in (*patterns, *numeric, *addresses, 'timestamp', 'is_transfer'):
+        if key not in raw:
+            continue
+        value = raw[key]
+        if value is None:
+            fields[key] = None
+            continue
+        if key in addresses:
+            value = history._ss58(value)
+            pattern = r'(?:[1-9A-HJ-NP-Za-km-z]{47,48}|0x[0-9a-fA-F]{64})'
+        elif key in numeric:
+            pattern = r'[+-]?\d{1,80}(?:\.\d{1,40})?(?:[eE][+-]?\d{1,4})?'
+        else:
+            pattern = patterns.get(key)
+        if key == 'timestamp':
+            clean = history.timestamp(value)
+        elif key == 'is_transfer':
+            clean = value if isinstance(value, bool) else None
+        else:
+            text = str(value)
+            clean = text if re.fullmatch(pattern, text) else None
+        fields[key] = clean if clean is not None else {
+            'type': type(raw[key]).__name__, 'value_omitted': True}
+    return fields
+
+
+def _row_validation(result, number, address, tab, meta):
+    """Explain page rejection without changing financial normalization."""
+    raw = result.get('data')
+    if not isinstance(raw, list):
+        return None
+    expected = (min(meta['page_size'], max(0, meta['total_items']
+                - (number - 1) * meta['page_size'])) if meta else None)
+    rejected, duplicates, order, codes = [], [], [], Counter()
+    seen, times, normalized = {}, [], 0
+    for position, item in enumerate(raw, 1):
+        why = []
+        try:
+            event = history.normalize(item, tab, address, rejection=why)
+        except (TypeError, ValueError, OverflowError):
+            event, why = None, ['normalization_exception']
+        if event is None:
+            reason = why[0] if why else 'normalization_rejected'
+            codes[reason] += 1
+            if len(rejected) < 3:
+                rejected.append(dict(row_number=position, reason=reason,
+                                     fields=_public_row(item)))
+            continue
+        normalized += 1
+        ident = event['id']
+        if ident in seen:
+            if len(duplicates) < 3:
+                duplicates.append(dict(row_number=position,
+                                       first_row_number=seen[ident],
+                                       fields=_public_row(item)))
+        else:
+            seen[ident] = position
+        if times and times[-1] < event['time'] and len(order) < 3:
+            order.append(dict(row_number=position, previous_time=times[-1],
+                              current_time=event['time']))
+        times.append(event['time'])
+    reasons = []
+    if expected is not None and len(raw) != expected:
+        reasons.append('row_count_mismatch')
+    if codes:
+        reasons.append('normalization_rejected')
+    if normalized != len(seen):
+        reasons.append('duplicate_event_ids')
+    if times != sorted(times, reverse=True):
+        reasons.append('timestamp_order_invalid')
+    return dict(page=number, expected_rows=expected, received_rows=len(raw),
+                normalized_rows=normalized, unique_normalized_rows=len(seen),
+                reasons=reasons, rejection_counts=dict(codes),
+                rejected_rows=rejected, duplicate_rows=duplicates,
+                order_breaks=order, samples_truncated=(sum(codes.values()) > 3
+                or normalized - len(seen) > 3))
+
+
 def _checkpoint(value, address, tab):
     initial = dict(version=1, address=address, tab=tab, frontier_page=0,
                    anchor_ids=[], head_anchor_ids=[], complete=False)
@@ -172,6 +264,7 @@ class _Read:
         self.cache, self.events = {}, {}
         self.meta = None
         self.pagination_observed = None
+        self.row_validation = []
         self.current, self.reads = 1, 0
         self.failed = self.count_uncertain = self.complete = False
 
@@ -234,6 +327,11 @@ class _Read:
         meta = _metadata(raw, number, self.meta)
         rows = _page(raw, number, self.address, self.tab, meta)
         if rows is None:
+            if raw:
+                detail = _row_validation(raw, number, self.address, self.tab,
+                                         meta)
+                if detail is not None:
+                    self.row_validation.append(detail)
             self.error('unsupported_pagination' if raw and meta is None else
                        'page_rows_invalid' if meta else 'page_unavailable')
             if number == 1:
@@ -378,6 +476,7 @@ class _Read:
             cumulative=cumulative, remaining=remaining, status=status,
             pages_read=self.reads, errors=self.errors, head_since=since,
             pagination_observed=self.pagination_observed,
+            row_validation=self.row_validation,
             completion_tier='observed_source')
         return list(self.events.values()), status
 
