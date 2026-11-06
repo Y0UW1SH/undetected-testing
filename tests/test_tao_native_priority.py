@@ -134,7 +134,8 @@ def test_history_excludes_inspected_screened_and_retry_without_registry(db):
                     '(address TEXT,checked_at TEXT,payload TEXT)')
     for address, extra in (
             (inspected, {'coverage': {
-                'account': 'complete', 'transactions': 'complete'}}),
+                'account': 'complete', 'transactions': 'complete',
+                'transfers': 'complete'}}),
             (screened, {'screens': ['known_exchange']})):
         history.execute('INSERT INTO wallet_performance VALUES (?,?,?)',
                         (address, STAMP, json.dumps(
@@ -333,3 +334,40 @@ def test_incomplete_or_wrong_block_pool_response_is_rejected(kind):
     source.prepare(BLOCK)
     with pytest.raises(ValueError):
         source.pools(BLOCK, {('0x' + '01' * 32, 1): '01' * 48 + '0100'})
+
+
+def test_partial_legacy_history_gets_reserved_native_backfill_slot(db):
+    from seo import tao_native_priority as priority
+    from seo import tao_holder_queue as queue
+    hot, old = position(db, 1, 2, 1, 5)
+    fresh = [position(db, 1, i, 1, 100 - i)[1] for i in range(3, 10)]
+    history = sqlite3.connect(':memory:')
+    queue.schema(history)
+    history.execute('INSERT INTO holder_research_attempts VALUES (?,?,?)',
+                    (old, '2026-11-05T12:00:00Z', 'inspected'))
+    history.execute('CREATE TABLE wallet_performance '
+                    '(address TEXT,checked_at TEXT,payload TEXT)')
+    history.execute('INSERT INTO wallet_performance VALUES (?,?,?)',
+                    (old, STAMP, json.dumps(dict(address=old, coverage={
+                        'account': 'complete', 'transactions': 'partial',
+                        'transactions_rows': 50, 'transfers': 'complete'}))))
+    before = history.total_changes
+    result = priority.prioritize(
+        db, Source([1], {(hot, 1): pool()}), history_dbs=[history],
+        limit=4, stamp=STAMP)
+    assert result['addresses'] == [old, *fresh[:3]]
+    assert result['candidates'][0]['research_status'] == 'partial'
+    assert result['subnet_coverage'][0]['partial_history_wallets'] == 1
+    assert result['subnet_coverage'][0]['complete_history_wallets'] == 0
+    assert result['alpha_v2_traversal_complete'] is False
+    assert history.total_changes == before
+    history.close()
+
+
+def test_traversal_completion_is_independent_of_research_completion(db):
+    from seo import tao_native_priority as priority
+    hot, _ = position(db, 1, 2, 1, 5)
+    db.execute('UPDATE native_holder_scan SET complete=1')
+    result = priority.prioritize(
+        db, Source([1], {(hot, 1): pool()}), limit=1, stamp=STAMP)
+    assert result['alpha_v2_traversal_complete'] is True

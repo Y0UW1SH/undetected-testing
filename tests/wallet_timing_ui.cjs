@@ -78,6 +78,11 @@ function fixture() {
 
 function runTests() {
   const report = fixture();
+  report.coverage.Buyer = {account:'complete', transactions:'partial',
+    transactions_rows:200, transactions_rows_this_run:50,
+    transactions_rows_added:40, transactions_rows_cumulative:200,
+    transactions_history:{source_total:250, cumulative:200, remaining:50},
+    transfers:'partial', transfers_rows:10};
   const page = view(report);
   assert.equal(page.select('all').hidden, true);
   assert.match(page.select('buy','scan').text, /No wallets/);
@@ -89,6 +94,8 @@ function runTests() {
   page.id('results').findTitle('Buyer').onclick();
   assert.match(page.id('detail').textContent, /buy timing uses any rise/);
   assert.match(page.id('detail').textContent, /75% \(6\/8\)/);
+  assert.match(page.id('detail').textContent, /transactions 50 40 200 250 50 partial/);
+  assert.match(page.id('detail').textContent, /transfers 10 Unknown Unknown Unknown Unknown partial/);
   assert.match(page.select('sell','2').text, /No wallets/);
   assert.match(page.select('sell','any').text, /Seller/);
   assert.match(page.select('all').text, /Buyer/);

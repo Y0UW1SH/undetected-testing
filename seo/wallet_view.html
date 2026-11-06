@@ -175,6 +175,11 @@ const label=add(s,'div');label.className='address';label.append(anchor('account'
 let reasons=[...(w.screens||[]),...(w.evidence_gaps||[])].map(t=>t.replaceAll('_',' '));
 add(s,'p',[watched.has(a)?'Watched':'Not on watchlist','Account as of '+time(w.account_as_of),...reasons].join(' · '));
 if(R.discovery_sources?.[a]?.length)add(s,'p','Discovered from: '+R.discovery_sources[a].join(', '));
+add(s,'h3','History captured');
+add(s,'p','Fetched rows include recent-page refresh and overlap. Stored rows are deduplicated source-table records. Partial histories need older pages; a complete source history can still have unresolved acquisition costs. Older reports may not contain cumulative counts.');
+const historyCoverage=R.coverage?.[a]||{};
+const count=value=>Number.isInteger(value)&&value>=0?String(value):'Unknown';
+grid(s,['Table','Fetched this run','New rows','Stored rows','Source total','Remaining','Status'],['transactions','transfers'].map(tab=>{const progress=historyCoverage[tab+'_history']||{};return [tab,count(historyCoverage[tab+'_rows_this_run']??historyCoverage[tab+'_rows']),count(historyCoverage[tab+'_rows_added']),count(historyCoverage[tab+'_rows_cumulative']??progress.cumulative),count(progress.source_total),count(progress.remaining),historyCoverage[tab]||'unavailable']}),'No history coverage.');
 add(s,'h3','Sales and open holdings');
 add(s,'p',w.priced_sales+' fully priced sales eligible for trading wins; '+w.unpriced_sales+' sales with some or all cost unknown. TAO are gross of fees. Unknown cost is never set to zero.');
 if(w.growth_sales){add(s,'p','Economic realized on known units: '+num(signedKnown(w))+' TAO; trading price gain on known units: '+num(tradingKnown(w))+' TAO; proven growth proceeds: '+num(w.growth_proceeds_tao)+' TAO. '+w.growth_sales+' sales containing growth are excluded from trading win counts.');}

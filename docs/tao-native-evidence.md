@@ -15,7 +15,8 @@ shares; it excludes legacy `Alpha` rows and does not claim a complete holder
 census. Shares are not alpha quantities, portfolio values or profit rankings.
 The `holder_registry` rows work with `seo.tao_holder_queue`; native rows have
 unranked priority and unknown balances. Import attributed history results before
-selecting another batch so already researched wallets are not repeatedly chosen.
+selecting another batch so completed histories are not repeatedly chosen and
+partial histories remain eligible for deeper research.
 
 Taostats remains useful as an indexed source of historical buys, sells and
 transfers. A bounded GitHub collection can inspect explicitly selected native
@@ -34,8 +35,11 @@ try_tao_out/watch-env-313/Scripts/python.exe -m seo.tao_native_priority --db try
 
 Both input databases are opened read-only. The output distinguishes the complete
 active-network list from the partial holder traversal, and lists networks with
-no captured candidates. It excludes inspected or screened accounts and respects
-retry delays. Larger observed holdings receive priority within a subnet; alpha
+no captured candidates. It excludes complete or screened accounts and respects
+retry delays. Roughly a quarter of a multi-wallet batch is reserved for the
+oldest partial histories; unused slots go to the other lane. A one-wallet batch
+selects backfill on every fourth recorded attempt when both lanes have work.
+Larger observed holdings receive priority within a subnet; alpha
 quantities cannot be compared between subnets. These are partial position totals,
 not whole-wallet values. The tool makes no TAO-price or minimum-TAO claim.
 
@@ -120,8 +124,9 @@ Fully purged historical subnets still require archival evidence.
 Generation identity uses the registration block; the registration counter is
 additional evidence of ID reuse. A missing newer counter on an older subnet does
 not erase its verified registration block. Subnet immunity comes from the live
-network parameter, separately from neuron immunity. Dissolving, inactive and
-explicitly trading-disabled subnets invalidate current exit valuation claims.
+network parameter, separately from neuron immunity. Dissolving and inactive
+subnets invalidate current exit valuation claims. A false staking enable flag
+also requires exit verification; it does not prove every unstaking path is blocked.
 
 Local risk assessment defaults to a 216,000-block early-stage window, a minimum
 1,000-TAO reserve and a 5% marked-position/reserve exposure screen, with 24-hour

@@ -30,8 +30,9 @@ _REASONS = {
                        "validated current exit valuation.",
     "subnet_retiring": "The subnet is dissolving or awaiting cleanup; "
                        "current exit valuation is unconfirmed.",
-    "trading_disabled": "Subnet trading is disabled; saved marks do not "
-                        "establish a currently realizable exit.",
+    "trading_disabled": "The subnet's staking enable flag is false; saved "
+                        "marks do not establish an executable exit. This "
+                        "flag alone does not prove every exit is blocked.",
     "new_subnet": "Subnet age is within the configured early-stage window.",
     "subnet_in_immunity": "The subnet is in its protocol immunity period.",
     "immunity_unknown": "Subnet immunity status is unavailable.",

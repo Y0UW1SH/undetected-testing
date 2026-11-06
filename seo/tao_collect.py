@@ -76,7 +76,8 @@ def add_parser(sub):
     p.add_argument("--history-charts", type=_number, default=8,
                    help="maximum subnet charts for older trade timing (0–12)")
     p.add_argument("--history-pages", type=_number, default=3,
-                   help="maximum pages per wallet tab; first page = newest")
+                   help="older backfill pages per wallet tab, plus bounded "
+                   "fresh-head and overlap validation reads")
     p.add_argument("--follow-top", type=_number, default=0,
                    help="follow up to N profitable wallets with 2+ priced "
                    "sales and a win rate over 50 percent")
@@ -85,6 +86,9 @@ def add_parser(sub):
 
 
 def _schema(db):
+    indexed_history = db.execute("SELECT 1 FROM sqlite_master WHERE "
+                                 "type='table' AND name='wallet_history_rows'"
+                                 ).fetchone() is not None
     db.execute("CREATE TABLE IF NOT EXISTS wallet_events "
                "(id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS wallet_inventory "
@@ -92,6 +96,15 @@ def _schema(db):
                "PRIMARY KEY(address, time))")
     db.execute("CREATE TABLE IF NOT EXISTS wallet_follow_links "
                "(src TEXT, dst TEXT, PRIMARY KEY(src, dst))")
+    db.execute("CREATE TABLE IF NOT EXISTS wallet_history_rows "
+               "(address TEXT NOT NULL,tab TEXT NOT NULL,event_id TEXT "
+               "NOT NULL,PRIMARY KEY(address,tab,event_id))")
+    db.execute("CREATE TABLE IF NOT EXISTS wallet_history_progress "
+               "(address TEXT NOT NULL,tab TEXT NOT NULL,checked_at TEXT "
+               "NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(address,tab))")
+    if not indexed_history:
+        _index_history(db, (r[0] for r in db.execute(
+            "SELECT id FROM wallet_events")))
     db.commit()
 
 
@@ -245,10 +258,71 @@ def _read(store, session=None, explicit=()):
 
 
 def _save_events(db, events):
+    events = list(events)
     db.executemany("INSERT INTO wallet_events VALUES (?,?) ON CONFLICT(id) "
                    "DO UPDATE SET payload=excluded.payload "
                    "WHERE wallet_events.payload <> excluded.payload",
                    [(e["id"], json.dumps(e)) for e in events])
+    _index_history(db, (e["id"] for e in events))
+
+
+def _index_history(db, identities):
+    """Associate normalized public-table IDs, excluding other evidence IDs."""
+    rows = []
+    for ident in identities:
+        try:
+            parts = json.loads(ident)
+        except (TypeError, ValueError):
+            continue
+        if (isinstance(parts, list) and len(parts) >= 3
+                and parts[0] in ("transactions", "transfers")
+                and isinstance(parts[2], str) and parts[2]):
+            rows.append((parts[2], parts[0], ident))
+    db.executemany("INSERT OR IGNORE INTO wallet_history_rows VALUES (?,?,?)",
+                   rows)
+
+
+def _history_state(db, address, tab):
+    row = db.execute("SELECT payload FROM wallet_history_progress "
+                     "WHERE address=? AND tab=?", (address, tab)).fetchone()
+    state = None
+    if row:
+        try:
+            candidate = json.loads(row[0])
+            if (isinstance(candidate, dict)
+                    and candidate.get("address") == address
+                    and candidate.get("tab") == tab):
+                state = candidate
+        except (TypeError, ValueError):
+            pass
+    found = db.execute("SELECT event_id FROM wallet_history_rows "
+                       "WHERE address=? AND tab=?", (address, tab))
+    known = {r[0] for r in found}
+    return state, known
+
+
+def _save_history(db, address, tab, events, progress, stamp):
+    """Commit a safe per-tab resume point with every row it depends on."""
+    events = list(events)
+    state = progress.get("checkpoint")
+    if state is not None and (not isinstance(state, dict)
+                              or state.get("address") != address
+                              or state.get("tab") != tab):
+        raise ValueError("History checkpoint does not match its wallet tab")
+    payload = json.dumps(state, allow_nan=False) if state is not None else None
+    with db:
+        _save_events(db, events)
+        db.executemany("INSERT OR IGNORE INTO wallet_history_rows "
+                       "VALUES (?,?,?)", [(address, tab, e["id"])
+                                          for e in events])
+        if payload is not None:
+            db.execute("INSERT INTO wallet_history_progress VALUES (?,?,?,?) "
+                       "ON CONFLICT(address,tab) DO UPDATE SET "
+                       "checked_at=excluded.checked_at,"
+                       "payload=excluded.payload",
+                       (address, tab, stamp, payload))
+    return db.execute("SELECT COUNT(*) FROM wallet_history_rows WHERE "
+                      "address=? AND tab=?", (address, tab)).fetchone()[0]
 
 
 def _discover(args, session, store, stamp, coverage, holders, origins):
@@ -364,23 +438,47 @@ def _inspect(args, session, store, address, earner, stamp, coverage):
         p.netuid and p.alpha and p.alpha > 0 for p in positions)
     rows = []
     for tab in ("transactions", "transfers"):
+        checkpoint, known_ids = _history_state(store.conn, address, tab)
         if (args.max_balance_tao and snap.balance_total is not None
                 and snap.balance_total > args.max_balance_tao):
             coverage[tab] = "skipped"
-            coverage[tab + "_rows"] = 0
+            coverage[tab + "_rows"] = len(known_ids)
+            coverage[tab + "_rows_cumulative"] = len(known_ids)
+            coverage[tab + "_rows_this_run"] = 0
+            coverage[tab + "_rows_added"] = 0
+            coverage[tab + "_history"] = dict(
+                status="skipped", source_total=None, captured_this_run=0,
+                new_rows=0, cumulative=len(known_ids), remaining=None,
+                pages_read=0, completion_tier=None)
             continue
         session.pause()
-        window = {}
+        window, progress = {}, {}
         events, status = tao_history.fetch_history(
-            session, address, tab, args.history_pages, window=window)
-        if "since" in window:
-            coverage[tab + "_since"] = window["since"]
+            session, address, tab, args.history_pages, window=window,
+            checkpoint=checkpoint, known_ids=known_ids, progress=progress)
+        cumulative = _save_history(store.conn, address, tab, events,
+                                   progress, stamp)
+        since = progress.get("head_since") if progress else window.get("since")
+        if since:
+            coverage[tab + "_since"] = since
         diagnostic = window.get("diagnostic", {})
         if diagnostic and (status != "complete"
                            or diagnostic.get("verification_control")):
             coverage[tab + "_diagnostic"] = diagnostic
         coverage[tab] = status
-        coverage[tab + "_rows"] = len(events)
+        captured = len({event["id"] for event in events})
+        added = cumulative - len(known_ids)
+        coverage[tab + "_rows"] = cumulative
+        coverage[tab + "_rows_this_run"] = captured
+        coverage[tab + "_rows_added"] = added
+        coverage[tab + "_rows_cumulative"] = cumulative
+        info = {k: v for k, v in progress.items() if k != "checkpoint"}
+        info.update(status=status, source_total=progress.get("source_total"),
+                    captured_this_run=captured, new_rows=added,
+                    cumulative=cumulative, remaining=progress.get("remaining"),
+                    frontier_page=(progress.get("checkpoint") or {}).get(
+                        "frontier_page"), completion_tier="observed_source")
+        coverage[tab + "_history"] = info
         rows.extend(events)
     when = tao_history.timestamp(snap.snapshot_at)
     units = defaultdict(float)

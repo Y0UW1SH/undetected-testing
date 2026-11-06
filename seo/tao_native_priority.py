@@ -6,9 +6,9 @@ made: TAO value and any TAO minimum remain unknown. Both input databases are
 read-only; this module never assigns artificial browser holder ranks.
 """
 import argparse
-from collections import defaultdict, deque
+from collections import defaultdict
 from contextlib import ExitStack, closing, suppress
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -17,7 +17,7 @@ import sqlite3
 import sys
 import tempfile
 
-from seo.tao_holder_queue import _coverage_status, _has_table, _time
+from seo.tao_holder_queue import fair_select, research_state
 from seo.tao_local_watch import WatchError, _connect, _file_endpoint
 from seo.tao_native_evidence import _shares
 from seo.tao_native_holders import (
@@ -134,54 +134,6 @@ class PoolSource(ChainSource):
         return result
 
 
-def _research(databases, stamp, excluded):
-    """Use the queue's attributed-history rules without needing a registry."""
-    inspected, screened = set(), set(excluded)
-    waiting, attempted = set(), set()
-    now = _time(stamp)
-    if now is None:
-        raise ValueError('invalid research timestamp')
-    for db in databases:
-        if _has_table(db, 'holder_research_attempts'):
-            for address, when, status in db.execute(
-                    'SELECT address,checked_at,status '
-                    'FROM holder_research_attempts'):
-                checked = _time(when)
-                if checked is None or checked > now:
-                    continue
-                attempted.add(address)
-                if status == 'inspected':
-                    inspected.add(address)
-                elif status == 'screened':
-                    screened.add(address)
-                elif (status == 'unavailable'
-                      and now < checked + timedelta(hours=24)):
-                    waiting.add(address)
-        if _has_table(db, 'wallet_performance'):
-            for address, when, raw in db.execute(
-                    'SELECT address,checked_at,payload '
-                    'FROM wallet_performance'):
-                checked = _time(when)
-                if checked is None or checked > now:
-                    continue
-                try:
-                    wallet = json.loads(raw)
-                except (TypeError, ValueError):
-                    continue
-                if (not isinstance(wallet, dict)
-                        or wallet.get('address') != address):
-                    continue
-                status = _coverage_status(wallet.get('coverage'))
-                if status == 'inspected':
-                    inspected.add(address)
-                elif status == 'screened':
-                    screened.add(address)
-                if wallet.get('screens'):
-                    screened.add(address)
-    waiting -= inspected | screened
-    return inspected, screened, waiting, attempted
-
-
 def _alpha_units(mantissa, exponent, pool):
     shares = _shares(dict(mantissa=int(mantissa), exponent=exponent))
     denominator = _shares(pool['shares'])
@@ -204,7 +156,7 @@ def _decimal(units):
 
 def prioritize(db, source, *, history_dbs=(), limit=128, stamp=None,
                exclude_addresses=()):
-    """Select unique, uninspected wallets in rounds over all active subnets."""
+    """Select new and partial-history wallets across all active subnets."""
     _local_only()
     if type(limit) is not int or not 1 <= limit <= 512:
         raise ValueError('use 1..512 candidate wallets')
@@ -214,7 +166,7 @@ def prioritize(db, source, *, history_dbs=(), limit=128, stamp=None,
                          'FROM native_holder_scan WHERE id=1').fetchone()
         if not pin or not HASH.fullmatch(pin[0]):
             raise ValueError('native discovery pin required')
-        block, height, complete = pin
+        block, height, traversal_complete = pin
         rows = db.execute('SELECT storage_key,hotkey,coldkey,netuid,'
                           'share_mantissa,share_exponent '
                           'FROM native_holder_positions '
@@ -247,32 +199,26 @@ def prioritize(db, source, *, history_dbs=(), limit=128, stamp=None,
             units[net, address] += _alpha_units(
                 mantissa, exponent, pools[hot, net])
             position_counts[net, address] += 1
-        inspected, screened, waiting, attempted = _research(
-            [db, *history_dbs], stamp, exclude_addresses)
-        excluded = inspected | screened | waiting
+        state = research_state([db, *history_dbs], stamp, exclude_addresses,
+                               addresses={a for _, a in units})
+        complete, partial = state['complete'], state['partial']
+        screened, waiting = state['screened'], state['waiting']
+        attempted = set(state['attempts'])
+        excluded = complete | screened | waiting
         wallets = {n: {a for net, a in units if net == n} for n in active}
-        served = inspected | screened | attempted
+        served = complete | partial | screened | attempted
         order = sorted(active, key=lambda n: (len(wallets[n] & served), n))
         queues = {}
         ranks = {}
         for n in order:
             ranked = sorted(wallets[n], key=lambda a: (-units[n, a], a))
             ranks.update({(n, a): i + 1 for i, a in enumerate(ranked)})
-            queues[n] = deque(sorted(
+            queues[n] = sorted(
                 (a for a in wallets[n] if a not in excluded and units[n, a]),
-                key=lambda a: (a in attempted, -units[n, a], a)))
-        chosen, selected_for = [], {}
-        rounds = deque(n for n in order if queues[n])
-        while rounds and len(chosen) < limit:
-            net = rounds.popleft()
-            while queues[net] and queues[net][0] in selected_for:
-                queues[net].popleft()
-            if queues[net]:
-                address = queues[net].popleft()
-                chosen.append(address)
-                selected_for[address] = net
-            if queues[net]:
-                rounds.append(net)
+                key=lambda a: (a in attempted, -units[n, a], a))
+        selected_pairs = fair_select(queues, order, limit, state)
+        chosen = [a for _, a in selected_pairs]
+        selected_for = {a: n for n, a in selected_pairs}
         selected = set(chosen)
         coverage = []
         for net in sorted(active):
@@ -285,11 +231,16 @@ def prioritize(db, source, *, history_dbs=(), limit=128, stamp=None,
                 positive_valued_wallets=sum(
                     bool(units[net, a]) for a in found),
                 zero_valued_wallets=sum(not units[net, a] for a in found),
-                inspected_wallets=len(found & inspected),
+                inspected_wallets=len(found & (complete | partial)),
+                complete_history_wallets=len(found & complete),
+                partial_history_wallets=len(found & partial),
                 screened_wallets=len(found & screened),
                 retry_wait_wallets=len(found & waiting),
                 eligible_wallets=sum(a not in excluded and bool(units[net, a])
                                      for a in found),
+                backfill_pending_wallets=sum(
+                    a in partial and a not in excluded and bool(units[net, a])
+                    for a in found),
                 selected_wallets=len(found & selected)))
         candidates = []
         for address in chosen:
@@ -301,6 +252,8 @@ def prioritize(db, source, *, history_dbs=(), limit=128, stamp=None,
                 for n in sorted(active) if address in wallets[n]]
             candidates.append(dict(address=address,
                                    selected_for_netuid=selected_for[address],
+                                   research_status='partial' if address
+                                   in partial else 'pending',
                                    positions=positions))
         return dict(
             source='local-finney-alpha-v2-pools', block_hash=block,
@@ -311,13 +264,15 @@ def prioritize(db, source, *, history_dbs=(), limit=128, stamp=None,
                 bool(r['selected_wallets']) for r in coverage),
             native_candidate_positions=len(rows), valued_pools=len(pools),
             inactive_observed_positions=inactive,
-            alpha_v2_traversal_complete=bool(complete),
+            alpha_v2_traversal_complete=bool(traversal_complete),
             holder_census_complete=False, addresses=chosen,
             candidates=candidates, tao_valuation_available=False,
             minimum_tao_filter_applied=False,
             selection='Largest observed alpha subtotals within each active '
-                      'subnet, round-robin, excluding inspected, screened '
-                      'and retry-wait wallets; untouched precede retries.',
+                      'subnet, round-robin, excluding complete, screened '
+                      'and retry-wait wallets. A quarter of bounded batches '
+                      'is reserved for partial-history backfill; untouched '
+                      'wallets precede failed retries in the other slots.',
             limitation='Holdings are research priority, not evidence of '
                        'profit. This partial AlphaV2 discovery excludes '
                        'unmigrated legacy Alpha; observed subtotals and ranks '

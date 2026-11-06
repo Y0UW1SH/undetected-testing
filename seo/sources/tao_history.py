@@ -196,7 +196,18 @@ def normalize(raw, tab, address):
                 netuid=netuid, transfer_side=side, evidence="transaction")
 
 
-def fetch_history(session, address, tab, pages, *, window=None):
+def fetch_history(session, address, tab, pages, *, window=None,
+                  checkpoint=None, known_ids=(), progress=None):
+    """Read history, optionally resuming a durable per-account/tab frontier.
+
+    ``progress`` opts into bounded backfill; persist its checkpoint together
+    with the returned events. Existing callers retain their page-limit API.
+    """
+    if progress is not None:
+        from seo.sources.tao_wallet_history import fetch_resumable
+        return fetch_resumable(
+            session, address, tab, pages, window=window,
+            checkpoint=checkpoint, known_ids=known_ids, progress=progress)
     name = "delegate" if tab == "transactions" else "transfers"
     session.goto(account_url(address) + "/" + tab, check_google=False)
     return _read_pages(session, name, address, tab, pages, window)
@@ -215,16 +226,20 @@ def _wait_table(session, js):
     for _ in range(PAGE_POLLS):
         result = session.sb.evaluate(js)
         state = result if isinstance(result, dict) else {}
-        if state.get("status") in ("success", "error"):
+        fetching = (state.get("diagnostic") or {}).get("fetch_status")
+        if (state.get("status") in ("success", "error")
+                and fetching not in ("fetching", "paused")):
             break
         time.sleep(POLL_INTERVAL)
     return state
 
 
-def _read_pages(session, name, address, tab, pages, window=None):
+def _read_pages(session, name, address, tab, pages, window=None, *,
+                start_page=1, raw_page=None):
     events = {}
     incomplete = False
-    for page in range(1, pages + 1):
+    last_page = start_page + pages - 1
+    for page in range(start_page, last_page + 1):
         js = TABLE_QUERY.replace("NAME", json.dumps(name)).replace(
             "OWNER", json.dumps(address)).replace("PAGE", str(page))
         state = _wait_table(session, js)
@@ -261,8 +276,9 @@ def _read_pages(session, name, address, tab, pages, window=None):
                         session.sb.save_screenshot(str(path))
         if window is not None:
             window["diagnostic"] = diag
-        result = (state.get("data")
-                  if state.get("status") == "success" else None)
+        result = (state.get("data") if state.get("status") == "success"
+                  and diag.get("fetch_status") not in ("fetching", "paused")
+                  else None)
         if not isinstance(result, dict) or not isinstance(
                 result.get("data"), list):
             if window is not None:
@@ -272,6 +288,8 @@ def _read_pages(session, name, address, tab, pages, window=None):
             status = "partial" if page > 1 else "unavailable"
             return list(events.values()), status
         pagination = result.get("pagination") or {}
+        if raw_page is not None:
+            raw_page.update(result)
         if str(pagination.get("current_page", page)) != str(page):
             break
         for raw in result["data"]:
@@ -299,7 +317,7 @@ def _read_pages(session, name, address, tab, pages, window=None):
                                                "complete")
         except (TypeError, ValueError, ZeroDivisionError):
             break
-        if page == pages or not session.sb.evaluate(NEXT):
+        if page == last_page or not session.sb.evaluate(NEXT):
             break
         session.pause()
     return list(events.values()), "partial"

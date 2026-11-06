@@ -75,9 +75,13 @@ further link discovery. For known native transactions, pass e.g.
 `--extrinsic 9344821-0027:198,199` to verify the Taostats detail pages
 independently. These records do not imply wallet history coverage.
 
-`--history-pages` sets the page limit for each tab, starting with the
-newest activity. A limit of 1 is useful for checking site access. Raising
-the limit retrieves older activity when the site serves it. Set `--delay 2`
+`--history-pages` budgets older pages per wallet tab. The collector saves a
+checkpoint in the same database as the rows, refreshes recent activity, and
+continues older history on the next run. It reads at most three additional
+pages to refresh and validate overlap. Keep the same database between runs;
+GitHub Actions restores it from the data branch automatically. A limit of 1
+is useful for checking site access. Raising the limit retrieves older activity
+faster when the site serves it. Set `--delay 2`
 for a fixed pause or `--delay 2-4` for a range in seconds. To set the
 default in PowerShell, use `$env:TAO_DELAY = '2-4'`.
 
@@ -99,6 +103,14 @@ performance, open the collector's `tao_collect.json` report.
   reached a page limit or could read only part of the history. Unavailable
   means the tab supplied no usable result. The workflow saves partial data and flags the run if
   every attempted wallet lacks readable data for either history tab.
+  Each tab reports rows fetched this run (including overlap), newly added
+  rows, cumulative stored rows, the observed source total, and remaining rows.
+  A saved count of 50 is not a claim that the wallet has only 50 transactions.
+  Source completion requires a verified terminal page and matching unique row
+  counts; it describes that explorer table, not an independent chain audit.
+  Partial histories remain eligible for later research. If the source changes
+  unexpectedly, the collector preserves row facts and reports the gap instead
+  of declaring completion.
 * `positions` records quantities per wallet and subnet with their weighted
   buy price when it can be traced. `transfers` includes native TAO and
   stake movements. A stake transfer can carry known basis from the sender

@@ -51,7 +51,7 @@ on:
         type: string
         default: "10"
       history_pages:
-        description: "Maximum pages per wallet history tab"
+        description: "Older history pages per tab; resumes next run, plus bounded recent/overlap checks"
         type: string
         default: "3"
       delay:
@@ -229,13 +229,34 @@ jobs:
                         "Pages resume and wallets are deduplicated across runs.\n", file=out)
                   for name, value in queue.items():
                       print(f"- {name.replace('_', ' ')}: {value}", file=out)
-              print("| Page | Complete | Partial | Unavailable | Skipped | Rows this run |", file=out)
-              print("| --- | ---: | ---: | ---: | ---: | ---: |", file=out)
+              print("| Page | Complete | Partial | Unavailable | Skipped | Rows fetched this run | Stored tab rows |", file=out)
+              print("| --- | ---: | ---: | ---: | ---: | ---: | ---: |", file=out)
               for tab in ("transactions", "transfers"):
                   status = Counter(c.get(tab, "skipped") for c in coverage)
-                  rows = sum(c.get(tab + "_rows", 0) for c in coverage)
+                  rows = sum(c.get(tab + "_rows_this_run", c.get(tab + "_rows", 0)) for c in coverage)
+                  stored = sum(c.get(tab + "_rows_cumulative", c.get(tab + "_rows", 0)) for c in coverage)
                   print(f"| {tab} | {status['complete']} | {status['partial']} | "
-                        f"{status['unavailable']} | {status['skipped']} | {rows} |", file=out)
+                        f"{status['unavailable']} | {status['skipped']} | {rows} | {stored} |", file=out)
+              print("\n### Per-wallet history progress\n", file=out)
+              print("Fetched rows include recent-page refresh and overlap. Stored rows are "
+                    "deduplicated table records, not independent winning trades. Partial "
+                    "history remains queued for older-page research; missing source totals "
+                    "are unknown. Complete means observed explorer history, not a full "
+                    "native-chain audit.\n", file=out)
+              print("| Wallet | Table | Fetched | New | Stored | Source total | Remaining | Status |", file=out)
+              print("| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |", file=out)
+              def number(value):
+                  return str(value) if type(value) is int and value >= 0 else "unknown"
+              for address, item in report["coverage"].items():
+                  for tab in ("transactions", "transfers"):
+                      progress = item.get(tab + "_history") or {}
+                      print(f"| {account(address)} | {tab} | "
+                            f"{number(item.get(tab + '_rows_this_run', item.get(tab + '_rows')))} | "
+                            f"{number(item.get(tab + '_rows_added'))} | "
+                            f"{number(item.get(tab + '_rows_cumulative', item.get(tab + '_rows')))} | "
+                            f"{number(progress.get('source_total'))} | "
+                            f"{number(progress.get('remaining'))} | "
+                            f"{item.get(tab, 'skipped')} |", file=out)
               priced = sum(t["priced_sales"] for t in report["traders"])
               unpriced = sum(report["unpriced_sales"].values())
               if priced:

@@ -6,7 +6,11 @@ import pytest
 
 
 STAMP = "2026-11-06T12:00:00+00:00"
-COMPLETE = {"account": "complete", "transactions": "complete"}
+COMPLETE = {"account": "complete", "transactions": "complete",
+            "transfers": "complete"}
+PARTIAL = {"account": "complete", "transactions": "partial",
+           "transactions_rows": 50, "transfers": "partial",
+           "transfers_rows": 50}
 
 
 @pytest.fixture
@@ -89,10 +93,11 @@ def test_only_attributed_usable_historical_coverage_is_inspected(db):
     history(db, "skipped", {**COMPLETE, "transactions": "skipped"})
     history(db, "zero_trades", COMPLETE, priced_sales=0, positions=[])
     assert queue.select(db, [1], 0, STAMP) == [
-        "peer", "failed_account", "failed_history", "skipped"]
+        "partial", "failed_history", "skipped", "peer", "failed_account"]
     counts = queue.summary(db, [1], STAMP)
     assert (counts["registered"], counts["usable_history"],
-            counts["retry_wait"], counts["pending"]) == (7, 3, 0, 4)
+            counts["retry_wait"], counts["pending"]) == (7, 5, 0, 5)
+    assert (counts['complete_history'], counts['partial_history']) == (2, 3)
 
 
 def test_old_usable_history_survives_newer_failed_run(db):
@@ -111,17 +116,17 @@ def test_unavailable_retries_at_24_hours_without_hiding_partial_history(db):
             (1, "partial", 4), (1, "empty", 5))
     queue.record(db, {
         "unavailable": {"account": "unavailable"},
-        "skipped": {**COMPLETE, "transactions": "skipped"},
+        "skipped": {"account": "complete", "transactions": "skipped"},
         "partial": {**COMPLETE, "transactions": "partial",
                     "transactions_rows": 2},
         "empty": {**COMPLETE, "transactions_rows": 0},
     }, STAMP)
-    assert queue.select(db, [1], 0, "2026-11-07T11:59:59Z") == []
+    assert queue.select(db, [1], 0, "2026-11-07T11:59:59Z") == ["partial"]
     counts = queue.summary(db, [1], "2026-11-07T11:59:59Z")
     assert (counts["usable_history"], counts["retry_wait"],
-            counts["pending"]) == (2, 2, 0)
+            counts["pending"]) == (2, 2, 1)
     assert queue.select(db, [1], 0, "2026-11-07T12:00:00Z") == [
-        "unavailable", "skipped"]
+        "partial", "unavailable", "skipped"]
 
 
 def test_failure_does_not_erase_a_previous_success(db):
@@ -132,7 +137,7 @@ def test_failure_does_not_erase_a_previous_success(db):
     queue.record(db, {"a": {"account": "unavailable"}, "b": COMPLETE},
                  "2026-11-07T12:00:00Z")
     assert queue.select(db, [1], 0, "2026-11-09T12:00:00Z") == []
-    assert queue.summary(db, [1], STAMP)["usable_history"] == 2
+    assert queue.summary(db, [1], STAMP)["usable_history"] == 1
 
 
 def test_unreadable_partial_history_retries_after_delay(db):
@@ -163,7 +168,7 @@ def test_saved_partial_history_without_usable_rows_stays_pending(db, rows):
     from seo import tao_holder_queue as queue
 
     holders(db, (1, "partial", 2))
-    coverage = {**COMPLETE, "transactions": "partial"}
+    coverage = {"account": "complete", "transactions": "partial"}
     if rows is not None:
         coverage["transactions_rows"] = rows
     history(db, "partial", coverage)
@@ -203,3 +208,163 @@ def test_negative_limit_is_rejected(db):
 
     with pytest.raises(ValueError, match="limit"):
         queue.select(db, [1], -1, STAMP)
+
+
+def test_legacy_inspected_is_reclassified_by_attributed_tab_coverage(db):
+    from seo import tao_holder_queue as queue
+    holders(db, (1, 'old_partial', 2), (1, 'legacy_only', 3),
+            (1, 'tx_only', 4), (1, 'complete', 5))
+    queue.schema(db)
+    db.executemany('INSERT INTO holder_research_attempts VALUES (?,?,?)',
+                   [(a, STAMP, 'inspected') for a in
+                    ('old_partial', 'legacy_only', 'tx_only', 'complete')])
+    history(db, 'old_partial', PARTIAL)
+    history(db, 'tx_only', dict(
+        account='complete', transactions='complete', transactions_rows=0))
+    history(db, 'complete', COMPLETE)
+    assert set(queue.select(db, [1], 0, STAMP)) == {
+        'old_partial', 'legacy_only', 'tx_only'}
+    counts = queue.summary(db, [1], STAMP)
+    assert counts['complete_history'] == 1
+    assert counts['partial_history'] == 2
+    assert counts['usable_history'] == 3
+    assert counts['pending'] == 3
+
+
+def test_quarter_batch_backfills_oldest_partial_without_starving_new(db):
+    from seo import tao_holder_queue as queue
+    holders(db, (1, 'older', 6), (1, 'recent', 2),
+            *((1, 'new%d' % i, i + 7) for i in range(20)))
+    queue.record(db, {'older': PARTIAL}, '2026-11-04T12:00:00Z')
+    queue.record(db, {'recent': PARTIAL}, '2026-11-05T12:00:00Z')
+    batch = queue.select(db, [1], 4, STAMP)
+    assert batch == ['older', 'new0', 'new1', 'new2']
+    queue.record(db, {a: PARTIAL for a in batch}, STAMP)
+    next_batch = queue.select(db, [1], 4, '2026-11-06T13:00:00Z')
+    assert next_batch == ['recent', 'new3', 'new4', 'new5']
+    assert queue.summary(db, [1], STAMP)['partial_history'] == 5
+
+
+def test_single_slots_visit_partial_and_new_lanes(db):
+    from seo import tao_holder_queue as queue
+    holders(db, (1, 'partial', 2),
+            *((1, 'new%d' % i, i + 3) for i in range(20)))
+    queue.record(db, {'partial': PARTIAL}, '2026-11-04T12:00:00Z')
+    selected = []
+    for hour in range(4):
+        stamp = '2026-11-06T%02d:00:00Z' % (12 + hour)
+        address, = queue.select(db, [1], 1, stamp)
+        selected.append(address)
+        queue.record(db, {address: PARTIAL}, stamp)
+    assert 'partial' in selected
+    assert sum(a.startswith('new') for a in selected) == 3
+
+
+def test_failure_pauses_partial_but_preserves_usable_and_complete(db):
+    from seo import tao_holder_queue as queue
+    holders(db, (1, 'partial', 2), (1, 'complete', 3))
+    queue.record(db, {'partial': PARTIAL, 'complete': COMPLETE},
+                 '2026-11-05T12:00:00Z')
+    queue.record(db, {a: {'account': 'unavailable'} for a in
+                      ('partial', 'complete')}, STAMP)
+    counts = queue.summary(db, [1], STAMP)
+    assert counts['complete_history'] == counts['partial_history'] == 1
+    assert counts['retry_wait'] == 1
+    assert counts['usable_history'] == 2
+    assert queue.select(db, [1], 0, STAMP) == []
+    assert queue.select(db, [1], 0, '2026-11-07T12:00:00Z') == ['partial']
+
+
+def test_new_usable_partial_reopens_older_complete_history(db):
+    from seo import tao_holder_queue as queue
+    holders(db, (1, 'a', 2))
+    queue.record(db, {'a': COMPLETE}, '2026-11-05T12:00:00Z')
+    queue.record(db, {'a': PARTIAL}, STAMP)
+    assert queue.summary(db, [1], STAMP)['complete_history'] == 0
+    assert queue.select(db, [1], 4, STAMP) == ['a']
+
+
+def test_screening_wins_over_usable_history(db):
+    from seo import tao_holder_queue as queue
+    holders(db, (1, 'exchange', 2))
+    history(db, 'exchange', COMPLETE)
+    queue.record(db, {'exchange': {**COMPLETE, 'screened': True}}, STAMP)
+    counts = queue.summary(db, [1], STAMP)
+    assert counts['screened'] == 1
+    assert counts['usable_history'] == 0
+    assert queue.select(db, [1], 0, STAMP) == []
+
+
+def test_future_attempts_and_coverage_do_not_hide_present_candidates(db):
+    from seo import tao_holder_queue as queue
+    holders(db, (1, 'a', 2), (1, 'b', 3), (1, 'c', 4))
+    future = '2026-11-07T12:00:00Z'
+    queue.record(db, {'a': COMPLETE, 'b': {'account': 'unavailable'}}, future)
+    history(db, 'c', COMPLETE, stamp=future)
+    assert queue.select(db, [1], 0, STAMP) == ['a', 'b', 'c']
+    assert queue.summary(db, [1], STAMP)['usable_history'] == 0
+
+
+def test_backfill_quota_does_not_starve_a_previously_busy_subnet(db):
+    from seo import tao_holder_queue as queue
+    holders(db, (1, 'old', 2), (2, 'recent', 2),
+            *((1, 'done%d' % i, i + 3) for i in range(10)),
+            *((2, 'new%d' % i, i + 3) for i in range(10)))
+    queue.record(db, {'old': PARTIAL}, '2026-11-03T12:00:00Z')
+    queue.record(db, {'recent': PARTIAL}, '2026-11-04T12:00:00Z')
+    queue.record(db, {'done%d' % i: COMPLETE for i in range(10)},
+                 '2026-11-05T12:00:00Z')
+    assert queue.select(db, [1, 2], 4, STAMP)[0] == 'old'
+    queue.record(db, {'old': PARTIAL}, STAMP)
+    assert queue.select(db, [1, 2], 4, '2026-11-06T13:00:00Z')[0] == 'recent'
+
+
+def test_same_stamp_failure_does_not_erase_verified_complete(db):
+    from seo import tao_holder_queue as queue
+    holders(db, (1, 'a', 2))
+    queue.record(db, {'a': COMPLETE}, STAMP)
+    queue.record(db, {'a': {'account': 'unavailable'}}, STAMP)
+    assert queue.summary(db, [1], STAMP)['complete_history'] == 1
+
+
+def test_same_stamp_partial_failure_keeps_evidence_but_waits_to_retry(db):
+    from seo import tao_holder_queue as queue
+    holders(db, (1, 'a', 2))
+    queue.record(db, {'a': PARTIAL}, STAMP)
+    queue.record(db, {'a': {'account': 'unavailable'}}, STAMP)
+    counts = queue.summary(db, [1], STAMP)
+    assert counts['partial_history'] == counts['retry_wait'] == 1
+    assert queue.select(db, [1], 4, STAMP) == []
+
+
+def test_same_stamp_complete_does_not_override_screen(db):
+    from seo import tao_holder_queue as queue
+    holders(db, (1, 'a', 2))
+    queue.record(db, {'a': {**COMPLETE, 'screened': True}}, STAMP)
+    queue.record(db, {'a': COMPLETE}, STAMP)
+    assert queue.summary(db, [1], STAMP)['screened'] == 1
+    assert queue.select(db, [1], 4, STAMP) == []
+
+
+def test_passive_profile_refresh_does_not_defer_oldest_backfill(db):
+    from seo import tao_holder_queue as queue
+    holders(db, (1, 'older', 2), (1, 'newer', 3),
+            *((1, 'new%d' % i, i + 4) for i in range(10)))
+    old = '2026-11-04T12:00:00Z'
+    history(db, 'older', PARTIAL, stamp=old)
+    history(db, 'newer', PARTIAL, stamp='2026-11-05T12:00:00Z')
+    history(db, 'older', {}, stamp=STAMP,
+            transfer_links=[dict(src='newer', dst='older')])
+    state = queue.research_state([db], STAMP)
+    assert state['last_checked']['older'] == queue._time(old)
+    assert state['partial'] == {'older', 'newer'}
+    assert queue.select(db, [1], 4, STAMP)[0] == 'older'
+
+
+def test_passive_profile_can_still_supply_explicit_screening(db):
+    from seo import tao_holder_queue as queue
+    holders(db, (1, 'exchange', 2))
+    history(db, 'exchange', PARTIAL, stamp='2026-11-04T12:00:00Z')
+    history(db, 'exchange', {}, screens=['known_exchange'])
+    assert queue.summary(db, [1], STAMP)['screened'] == 1
+    assert queue.select(db, [1], 4, STAMP) == []
