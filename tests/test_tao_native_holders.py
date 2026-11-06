@@ -11,6 +11,12 @@ from seo.tao_holder_queue import select
 from seo.tao_local_watch import WatchError, _addr
 
 
+@pytest.fixture(autouse=True)
+def isolated_local_environment(monkeypatch):
+    # These tests use fake sources; guard tests set CI flags explicitly.
+    monkeypatch.delenv('CI', raising=False)
+    monkeypatch.delenv('GITHUB_ACTIONS', raising=False)
+
 PREFIX = '0x658faa385070e074c85bf6b568cf0555421d8174603a6a6036511a7619b402f0'
 BLOCK = '0x' + 'ab' * 32
 STAMP = '2026-11-06T12:00:00+00:00'

@@ -8,6 +8,13 @@ from seo.models import WalletSnapshot
 from tests.test_tao_ledger import day, event
 
 
+@pytest.fixture(autouse=True)
+def isolated_local_environment(monkeypatch):
+    # Offline fixture files contain no endpoint and perform no network calls.
+    monkeypatch.delenv('CI', raising=False)
+    monkeypatch.delenv('GITHUB_ACTIONS', raising=False)
+
+
 def fixture(tmp_path):
     store = storage.Storage(str(tmp_path / 'source.sqlite'))
     store.conn.execute('CREATE TABLE wallet_events(id TEXT PRIMARY KEY, '
