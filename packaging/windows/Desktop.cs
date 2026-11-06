@@ -28,6 +28,7 @@ internal sealed class Desktop : Form
         actions.Size = new Size(485, 177);
         Controls.Add(actions);
         ActionButton("Open report", delegate { Run("open", false); });
+        ActionButton("Edit watchlist", delegate { Run("edit-watchlist", false); });
         ActionButton("Download latest", delegate { Run("download", false); });
         ActionButton("Start local monitor", delegate { Run("start", false); });
         ActionButton("Stop local monitor", delegate { Run("stop", false); });

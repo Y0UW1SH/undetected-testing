@@ -1,7 +1,7 @@
 """Monitor finalized Bittensor events for watched coldkeys on this PC."""
 import argparse
 from collections import defaultdict
-from contextlib import closing, suppress
+from contextlib import ExitStack, closing, suppress
 from datetime import datetime, timezone
 from functools import lru_cache
 import getpass
@@ -17,6 +17,8 @@ import tempfile
 import time
 from urllib.parse import quote, urlsplit
 import warnings
+
+from seo import tao_movement_archive
 
 
 HOST = "api-bittensor-mainnet.n.dwellir.com"
@@ -262,7 +264,7 @@ def _event(height, i, ext, mod, name, attrs):
                 alpha_units=str(alpha) if alpha is not None else None)
 
 
-def block_events(height, records, watched):
+def block_events(height, records, watched, *, successes=None):
     failed = set()
     rows = []
     for i, obj in enumerate(records):
@@ -271,6 +273,9 @@ def block_events(height, records, watched):
         ext = rec.get("extrinsic_idx")
         if mod == "System" and name == "ExtrinsicFailed":
             failed.add(ext)
+        if (successes is not None and mod == "System"
+                and name == "ExtrinsicSuccess" and ext is not None):
+            successes.add(f"{height}-{ext:04d}")
         row = _event(height, i, ext, mod, name,
                      rec.get("attributes", rec.get("params")))
         if row:
@@ -313,7 +318,7 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def poll(chain, old, addresses, max_blocks=40, new_events=None):
+def poll(chain, old, addresses, max_blocks=40, new_events=None, archive=None):
     addresses = sorted(set(addresses))
     feed = dict(old, source=SOURCE, addresses=addresses, checked_at=_now(),
                 head=None, lag_blocks=None,
@@ -353,20 +358,36 @@ def poll(chain, old, addresses, max_blocks=40, new_events=None):
             stage = "block_events"
             records = chain.get_events(block_hash)
             stage = "decode_events"
-            matches = block_events(height, records, addresses)
+            if archive is None:
+                matches = block_events(height, records, addresses)
+            else:
+                successes = set()
+                rows = block_events(height, records, None, successes=successes)
+                confirmed = [r for r in rows if r["extrinsic"] in successes]
+                matches = [r for r in rows if r["src"] in addresses
+                           or r["dst"] in addresses]
+            when = None
             if matches:
                 stage = "block_timestamp"
                 ms = chain.query("Timestamp", "Now",
                                  block_hash=block_hash).value
                 when = datetime.fromtimestamp(int(ms) / 1000,
                                               timezone.utc).isoformat()
+            if archive is not None:
+                try:
+                    archive.record(genesis, height, block_hash, _now(), when,
+                                   confirmed)
+                except (sqlite3.Error, ValueError, OSError):
+                    feed["status"] = "archive_error"
+                    break
+            if matches:
                 for row in matches:
                     row["time"] = when
                 events.extend(matches)
                 if new_events is not None:
                     new_events.extend(matches)
             previous = height
-        if previous != head:
+        if previous != head and feed["status"] == "current":
             feed["status"] = "catching_up"
     except RequestBudget:
         feed["status"] = "rpc_budget"
@@ -389,7 +410,8 @@ def poll(chain, old, addresses, max_blocks=40, new_events=None):
     return feed
 
 
-def _poll_cycle(url, old, addresses, max_blocks, rpc_limit, notices):
+def _poll_cycle(url, old, addresses, max_blocks, rpc_limit, notices,
+                archive=None):
     """At most two connections share one block allowance and RPC meter."""
     meter = _RequestMeter(min(rpc_limit, MAX_RPC_PER_POLL))
     feed = dict(old, source=SOURCE, status="read_error", rpc_calls=0,
@@ -406,7 +428,8 @@ def _poll_cycle(url, old, addresses, max_blocks, rpc_limit, notices):
         chain = None
         try:
             chain = _connect(url, meter)
-            feed = poll(chain, feed, addresses, remaining, notices)
+            options = {"archive": archive} if archive is not None else {}
+            feed = poll(chain, feed, addresses, remaining, notices, **options)
         except WatchError:
             raise
         except RequestBudget:
@@ -470,10 +493,14 @@ def _screened(report):
     return blocked
 
 
+SIGNALS = {"buy": "buy_timing", "sell": "sell_timing",
+           "profit": "realized_profit", "open": "open_profit"}
+
+
 def _timing_picks(report):
     ranks = report.get("performance", {}).get("rankings", {})
     blocked = _screened(report)
-    picks = {"buy": [], "sell": []}
+    picks = {side: [] for side in SIGNALS}
     for side, selected in picks.items():
         for raw in ranks.get(side, []):
             try:
@@ -495,13 +522,21 @@ def _report_time(value):
         return datetime.min.replace(tzinfo=timezone.utc)
 
 
+def _assessment(report):
+    return dict(mode=report.get("mode", "discovery"),
+                checked_at=report.get("checked_at"),
+                picks=_timing_picks(report),
+                blocked=_screened(report), reviewed={
+                    a for a, c in report.get("coverage", {}).items()
+                    if c.get("account") == "complete" and c.get("transactions")
+                    in {"partial", "complete"}})
+
+
 @lru_cache(maxsize=32)
 def _cached_selection_snapshot(path, _mtime, _size):
     """Cache only the local selection metadata from a downloaded report."""
     report = json.loads(path.read_text(encoding="utf8"))
-    return dict(mode=report.get("mode", "discovery"),
-                checked_at=report.get("checked_at"),
-                picks=_timing_picks(report), blocked=_screened(report))
+    return _assessment(report)
 
 
 def _cached_discovery(cache, after=None):
@@ -519,8 +554,7 @@ def _cached_discovery(cache, after=None):
             when = _date(path)
             if when is not None and when >= cutoff:
                 files.append((when, int(folder.name), path))
-    later_screens = set()
-    additions = {"buy": [], "sell": []}
+    later = []
     for _, _, path in sorted(files, reverse=True):
         try:
             stat = path.stat()
@@ -529,15 +563,10 @@ def _cached_discovery(cache, after=None):
         except (OSError, ValueError):
             continue
         if snapshot["mode"] == "discovery":
-            return dict(snapshot, later_screens=later_screens,
-                        holder_picks=additions)
-        if snapshot["mode"] == "holder_supplement":
-            for side in additions:
-                additions[side].extend(a for a in snapshot["picks"][side]
-                                       if a not in later_screens)
-        later_screens.update(snapshot["blocked"])
-    if later_screens or any(additions.values()):
-        return dict(later_screens=later_screens, holder_picks=additions)
+            return dict(snapshot, later=later[::-1])
+        later.append(snapshot)
+    if later:
+        return dict(later=later[::-1])
     return None
 
 
@@ -547,9 +576,10 @@ def _address_reasons(report, explicit, picks=None):
         picks = (_timing_picks(report)
                  if report.get("mode", "discovery") == "discovery" else {})
     reasons = defaultdict(list)
-    sources = (("followed", report.get("following", [])),
-               ("buy_timing", picks.get("buy", [])),
-               ("sell_timing", picks.get("sell", [])), ("manual", explicit))
+    sources = [("followed", report.get("following", []))]
+    sources.extend((reason, picks.get(side, []))
+                   for side, reason in SIGNALS.items())
+    sources.append(("manual", explicit))
     try:
         for reason, addresses in sources:
             for raw in addresses:
@@ -566,33 +596,37 @@ def _address_reasons(report, explicit, picks=None):
 def _selection(report, explicit, previous=None, discovery=None):
     """Advance timing picks only on newer discoveries; screens apply now."""
     previous = previous or {}
-    state = dict(discovery_at=previous.get("discovery_at"),
-                 buy=list(previous.get("buy", [])),
-                 sell=list(previous.get("sell", [])),
+    state = {k: list(previous.get(k, [])) for k in SIGNALS}
+    state.update(discovery_at=previous.get("discovery_at"),
                  revoked=list(previous.get("revoked", [])))
     if not report:
         return _address_reasons({}, explicit, {}), state
     if report.get("mode", "discovery") == "discovery":
-        discovery = dict(checked_at=report.get("checked_at"),
-                         picks=_timing_picks(report))
+        discovery = _assessment(report)
     elif discovery and "performance" in discovery:
-        discovery = dict(checked_at=discovery.get("checked_at"),
-                         picks=_timing_picks(discovery))
+        discovery = _assessment(discovery)
     discovery = discovery or {}
     stamp = discovery.get("checked_at")
     newer = _report_time(stamp) > _report_time(state["discovery_at"])
     if "picks" in discovery and (not previous or newer):
         state.update(discovery["picks"], discovery_at=stamp, revoked=[])
-    revoked = (set(state["revoked"]) | _screened(report)
-               | set(discovery.get("later_screens", [])))
+    revoked = set(state["revoked"]) | set(discovery.get("blocked", []))
+    updates = list(discovery.get("later", []))
+    if report.get("mode") in {"watchlist", "holder_supplement"}:
+        updates.append(_assessment(report))
+    for scan in updates:
+        revoked.update(scan["blocked"])
+        for side in SIGNALS:
+            ranked = scan["picks"][side]
+            reviewed = scan["reviewed"]
+            # A watchlist run can only change labels for wallets it inspected.
+            observed = [a for a in ranked if a in reviewed
+                        or scan["mode"] == "holder_supplement"]
+            state[side] = list(dict.fromkeys(
+                [a for a in state[side] if a not in reviewed] + observed))
     state["revoked"] = sorted(revoked)
-    more = discovery.get("holder_picks", {})
-    supplement = report.get("mode") == "holder_supplement"
-    current = _timing_picks(report) if supplement else {}
-    for side in ("buy", "sell"):
-        candidates = state[side] + current.get(side, []) + more.get(side, [])
-        state[side] = [a for a in dict.fromkeys(candidates)
-                       if a not in revoked][:3]
+    for side in SIGNALS:
+        state[side] = [a for a in state[side] if a not in revoked][:3]
     return _address_reasons(report, explicit, state), state
 
 
@@ -659,14 +693,24 @@ def _notice(event):
 
 def _run(args):
     paths = [args.out, args.view] + ([args.report] if args.report else [])
+    if args.movement_archive is not None:
+        paths.extend([args.movement_archive, Path(str(args.out) + ".lock")])
+        if args.endpoint_file is not None:
+            paths.append(args.endpoint_file)
     if len({p.resolve() for p in paths}) != len(paths):
-        raise WatchError("Use separate paths for the report, feed and view.")
+        raise WatchError("Use separate paths for watcher inputs and outputs.")
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    with closing(sqlite3.connect(str(args.out) + ".lock", timeout=0)) as lock:
+    with ExitStack() as resources:
+        lock = resources.enter_context(closing(sqlite3.connect(
+            str(args.out) + ".lock", timeout=0)))
         try:
             lock.execute("BEGIN EXCLUSIVE")
         except sqlite3.OperationalError:
             raise WatchError("Another watcher already uses this feed.")
+        archive = None
+        if args.movement_archive is not None:
+            archive = resources.enter_context(closing(
+                tao_movement_archive.MovementArchive(args.movement_archive)))
         feed = {}
         if args.out.exists():
             feed = json.loads(args.out.read_text(encoding="utf8"))
@@ -698,6 +742,8 @@ def _run(args):
                                                   previous.get("discovery_at"))
                 reasons, timing = _selection(report, args.address, previous,
                                              discovery)
+                from seo.tao_watchlist import apply, PREFS
+                reasons = apply(PREFS, reasons)
                 addresses = sorted(reasons)
                 if addresses:
                     if url is None:
@@ -706,7 +752,7 @@ def _run(args):
                         else:
                             url = _endpoint(args.prompt)
                     feed = _poll_cycle(url, feed, addresses, args.max_blocks,
-                                       args.rpc_limit, notices)
+                                       args.rpc_limit, notices, archive)
                 else:
                     feed = dict(feed, source=SOURCE, status="no_wallets",
                                 checked_at=_now(), addresses=[], events=[],
@@ -737,7 +783,11 @@ def _run(args):
                           feed["status"], feed.get("last_scanned_block"),
                           feed.get("lag_blocks"), feed.get("rpc_calls"),
                           args.rpc_limit), flush=True)
-                error = feed["status"] == "read_error"
+                error = feed["status"] in ("read_error", "archive_error")
+                if feed["status"] == "archive_error":
+                    print("Could not save the local movement archive. "
+                          "The next poll will resume at the unrecorded block.",
+                          file=sys.stderr, flush=True)
                 if args.once:
                     return int(error)
                 time.sleep(max(0., INTERVAL - (time.monotonic() - start)))
@@ -771,6 +821,10 @@ def main(argv=None):
                    help="ask for a masked key if it is missing locally")
     p.add_argument("--endpoint-file", type=Path,
                    help="file with local Finney WSS/HTTPS URLs, one per line")
+    p.add_argument("--movement-archive", type=Path, metavar="SQLITE",
+                   nargs="?", const=tao_movement_archive.DEFAULT_PATH,
+                   help="also record all recognized successful movements from "
+                   "these blocks in a separate local archive (no extra RPC)")
     args = p.parse_args(argv)
     args.cached_report = not args.report and (
         args.cached_report or args.refresh_snapshots)

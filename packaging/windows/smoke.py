@@ -113,6 +113,7 @@ def desktop(exe, env):
     visit_type = ctypes.WINFUNCTYPE(
         wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     ui.EnumWindows.argtypes = (visit_type, wintypes.LPARAM)
+    ui.EnumChildWindows.argtypes = (wintypes.HWND, visit_type, wintypes.LPARAM)
     ui.GetWindowThreadProcessId.argtypes = (
         wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
     ui.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
@@ -141,6 +142,17 @@ def desktop(exe, env):
             time.sleep(.1)
         if not found:
             raise RuntimeError("Desktop launcher did not show its main window")
+        controls = []
+
+        @visit_type
+        def child(hwnd, _):
+            caption = ctypes.create_unicode_buffer(128)
+            ui.GetWindowTextW(hwnd, caption, len(caption))
+            controls.append(caption.value)
+            return True
+
+        ui.EnumChildWindows(found[0], child, 0)
+        assert "Edit watchlist" in controls, "Installed editor button missing"
         ui.PostMessageW(found[0], 0x0010, 0, 0)  # WM_CLOSE
         assert proc.wait(timeout=10) == 0
     finally:
@@ -182,7 +194,11 @@ def smoke(setup, folder, real_backup=None, real_explorer=None):
                    current_env).stdout
 
     print(command("self-test"), end="", flush=True)
+    verify = Path(__file__).with_name("smoke_editor.py")
+    print(run([str(python), "-B", str(verify)], env).stdout, end="",
+          flush=True)
     assert "stopped" in command("status")
+    assert "stopped" in command("stop-editor")
     assert "stopped" in command("stop")
     stop_standby(python, command, folder, env)
     print("Standby start, duplicate detection and stop passed.", flush=True)

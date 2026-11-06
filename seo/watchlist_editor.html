@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="watchlist-token" content="__WATCHLIST_TOKEN__">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<title>Watchlist · Wallet ledger</title>
+<style>
+:root{color-scheme:light;--paper:#f8faf6;--ink:#183129;--muted:#506359;--line:#cdd6cf;--green:#00633e;--wash:#e9f1e9;--red:#993a32}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
+main{max-width:1460px;margin:auto;padding:22px clamp(16px,4vw,64px) 54px}
+.brand{font:18px Georgia,serif;color:var(--muted);margin:0}.mast{border-bottom:2px solid var(--ink);padding-bottom:18px}
+h1,h2,h3,p{margin:0}h1{font:clamp(40px,5vw,64px)/1.1 Georgia,serif;letter-spacing:-.035em;margin:7px 0}
+h2{font:30px/1.24 Georgia,serif;letter-spacing:-.012em}h3{font-size:16px;margin:23px 0 8px}
+.caption,.description,.muted{color:var(--muted)}.description{max-width:78ch}.caption{font-size:13px}
+button,input,select,textarea{font:inherit;color:var(--ink);background:white;border:1px solid #97a79b;border-radius:4px}
+button,select{cursor:pointer}button{padding:7px 12px}button:hover{background:var(--wash)}button:disabled{opacity:.55;cursor:default}
+input,select,textarea{padding:7px 9px}textarea{resize:vertical;min-height:75px}.field{display:grid;gap:4px;color:var(--muted);font-size:13px}.field input,.field textarea,.field select{font-size:15px}
+.primary{background:var(--ink);border-color:var(--ink);color:white}.primary:hover{background:#284d3e}
+*:focus-visible{outline:3px solid #147451;outline-offset:2px}a{color:var(--green);text-underline-offset:3px}.mono{font-family:ui-monospace,Consolas,monospace}.address{overflow-wrap:anywhere;font-size:13px}
+.error{color:var(--red)}.positive{color:var(--green)}.negative{color:var(--red)}[hidden]{display:none!important}
+.columns{display:grid;grid-template-columns:minmax(0,1.52fr) minmax(310px,1fr);gap:clamp(22px,3vw,42px);align-items:start;margin-top:25px}
+.directory{min-width:0}.dirhead,.formhead,.actions,.filters,.line,.tabs{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.dirhead,.formhead,.line{justify-content:space-between}.dirhead{align-items:baseline}.filters{margin:15px 0 10px;align-items:end}
+.search{flex:1 1 180px}.search input{width:100%}.filters select{max-width:100%}
+.tabs{gap:0;border-bottom:1px solid var(--line);margin:12px 0}.tab{border:0;border-radius:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);padding:8px 11px}
+.tab:first-child{margin-left:-8px}.tab[aria-pressed=true]{border-color:var(--green);color:var(--green);font-weight:650}
+.listmsg{min-height:24px}.scope{margin:12px 0;color:var(--muted);font-size:13px}.scope summary{cursor:pointer}.scope p{margin-top:5px;max-width:70ch}
+.tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;text-align:left}
+th{white-space:nowrap;color:var(--muted);font-size:12px;font-weight:600;border-bottom:1px solid var(--line);padding:7px 8px}
+td{padding:9px 8px;border-bottom:1px solid var(--line);font-size:14px;vertical-align:middle}th:first-child,td:first-child{padding-left:6px}.right{text-align:right}
+tr.selected{background:var(--wash)}tr.selected td:first-child{box-shadow:inset 3px 0 var(--green)}
+.walletpick{display:block;max-width:220px;text-align:left;padding:3px 5px;border:0;background:transparent;font-weight:620;overflow-wrap:anywhere}
+.walletpick .smalladdr{display:block;color:var(--muted);font-size:12px;font-weight:400}.state{white-space:nowrap}.small{font-size:12px;color:var(--muted)}
+.inspector{border-left:1px solid var(--line);padding-left:clamp(18px,2vw,32px);min-width:0;position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto}.inspector .address{margin:5px 0}.back-directory{display:none}
+.specs{display:grid;grid-template-columns:1fr 1fr;gap:0 16px;border-block:1px solid var(--line);margin:14px 0 7px}
+.specs div{padding:9px 0}.specs dt{font-size:12px;color:var(--muted)}.specs dd{margin:2px 0 0;font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
+ul{padding-left:20px;margin:5px 0}.controls{margin-top:14px;display:grid;gap:9px}.controls fieldset{margin:0;padding:0;border:0}
+legend{font-weight:600;margin:0 0 5px}.choices{display:flex;gap:5px;flex-wrap:wrap}.choices label{display:flex;align-items:center;gap:5px;border:1px solid var(--line);background:white;border-radius:4px;padding:6px 8px;cursor:pointer}
+.choices label:has(input:checked){background:var(--wash);border-color:var(--green)}input[type=radio]{accent-color:var(--green);margin:0}
+.notice{min-height:22px;font-size:13px}.emptybox{padding:24px 8px;color:var(--muted);border-bottom:1px solid var(--line)}
+.reportlinks{display:flex;gap:8px 18px;align-items:center;flex-wrap:wrap;margin:0 0 8px;font-size:13px}.reportlinks .brand{margin-right:auto}
+.ranks{display:flex;gap:7px 16px;flex-wrap:wrap;font-size:13px}.ranks span{white-space:nowrap}
+dialog{background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:22px;width:min(450px,calc(100vw - 30px))}
+dialog::backdrop{background:rgba(17,37,29,.37)}dialog .field{margin:15px 0 8px}.btnrow{display:flex;gap:8px;align-items:center}
+@media(max-width:850px){.columns{grid-template-columns:1fr}.inspector{position:static;max-height:none;overflow:visible;border-left:0;border-top:2px solid var(--ink);padding:20px 0 0}.back-directory{display:inline-block;margin-top:16px}.walletpick{max-width:210px}}
+@media(max-width:520px){main{padding-top:15px}.dirhead button{padding:6px 9px}.filters{gap:7px}.filters .search{flex-basis:100%}.walletpick{max-width:145px}.tablewrap td,.tablewrap th{padding-left:5px;padding-right:5px}th:nth-child(2),td:nth-child(2){display:none}.tabs{gap:0}.tab{padding:8px}.specs{gap:0 10px}}
+</style>
+</head>
+<body><main>
+<header class="mast"><nav class="reportlinks" aria-label="Local reports"><span class="brand">Wallet ledger</span><a href="/wallets.html">Wallet report</a><a href="/accounts.html">Taostats accounts</a><a href="/network.html">Transfer explorer</a></nav><h1>Private watchlist</h1>
+<p class="description">Choose which wallets your local monitor follows. Labels, notes and overrides stay on this PC.</p></header>
+<div class="columns">
+<section class="directory" aria-labelledby="wallets-heading">
+<div class="dirhead"><h2 id="wallets-heading">Wallet directory</h2><div class="btnrow"><button type="button" id="reload">Refresh</button><button type="button" id="add" class="primary">Add address</button></div></div>
+<p id="coverage" class="caption" role="status">Loading saved research…</p>
+<details class="scope"><summary>Why do reports show fewer wallets?</summary><p>The wallet report opens one scan. A wallet only appears in a ranking when its history supports that flag. This list combines the downloaded scans. Searching the Taostats directory also finds addresses whose trades we haven't inspected yet.</p></details>
+<div class="tabs" aria-label="Monitoring filter"><button class="tab" data-scope="all" aria-pressed="true">All wallets</button><button class="tab" data-scope="watching" aria-pressed="false">Watching</button><button class="tab" data-scope="muted" aria-pressed="false">Muted</button></div>
+<div class="filters"><label class="field search">Find wallet<input id="query" type="search" placeholder="Address, prefix or private label" autocomplete="off" spellcheck="false"></label>
+<label class="field">Evidence<select id="filter"><option value="all">All evidence</option><option value="inspected">History inspected</option><option value="uninspected">History uninspected</option><option value="profit_rank">Realized P/L ranked</option><option value="open_rank">Open P/L ranked</option><option value="buy_rank">Buy timing ranked</option><option value="sell_rank">Sell timing ranked</option><option value="gaps">Evidence gaps</option><option value="screens">Screened out</option></select></label>
+<label class="field">Sort by<select id="sort"><option value="research">Research first</option><option value="both">Known realized + open P/L</option><option value="known_realized">Known realized P/L</option><option value="known_open">Known open P/L</option><option value="checked_at">Latest inspection</option><option value="address">Address</option></select></label></div>
+<p id="list-status" class="caption listmsg" aria-live="polite"></p>
+<div class="tablewrap"><table><thead><tr><th>Wallet</th><th>Evidence</th><th class="right">Realized TAO</th><th>Monitoring</th></tr></thead><tbody id="rows"></tbody></table></div>
+<p id="list-empty" class="emptybox" hidden></p>
+<div class="actions" style="margin-top:12px"><button id="more" hidden>Show more wallets</button></div>
+</section>
+<aside class="inspector" aria-labelledby="detail-title">
+<h2 id="detail-title" tabindex="-1">Wallet details</h2><p id="choose" class="description">Choose a wallet to review its history and edit your monitoring preference.</p>
+<div id="detail" hidden>
+<p id="full-address" class="mono address"></p><a id="taostats" target="_blank" rel="noopener noreferrer">Open on Taostats ↗</a>
+<p id="research-state" class="caption" style="margin-top:10px"></p>
+<dl class="specs" id="specs"></dl><p id="basis-help" class="caption"></p>
+<div id="evidence"></div>
+<form class="controls" id="edit"><fieldset><legend>Monitoring preference</legend><div class="choices">
+<label><input type="radio" name="choice" value="watch">Watch</label>
+<label><input type="radio" name="choice" value="mute">Mute</label>
+<label><input type="radio" name="choice" value="auto">Use automatic</label></div></fieldset>
+<p class="caption" id="auto-reason"></p>
+<label class="field">Private label<input id="label" maxlength="100" autocomplete="off"></label>
+<label class="field">Private note<textarea id="note" rows="3" maxlength="2000"></textarea></label>
+<div class="actions"><button id="save" class="primary" disabled>Save changes</button><span id="save-status" class="notice" role="status"></span></div>
+</form><a class="back-directory" href="#wallets-heading">Back to wallet directory</a></div></aside></div>
+<dialog id="add-dialog" aria-labelledby="dialog-title"><h2 id="dialog-title">Add a wallet</h2><form id="add-form">
+<label class="field">Bittensor coldkey<input id="new-address" class="mono" autocomplete="off" spellcheck="false" required></label>
+<p id="add-error" class="notice error" role="status"></p><div class="actions"><button class="primary">Review address</button><button type="button" id="cancel-add">Cancel</button></div></form></dialog>
+</main>
+<script>
+'use strict';
+const byId=id=>document.getElementById(id);
+const ui=Object.fromEntries([...document.querySelectorAll('[id]')].map(node=>[node.id,node]));
+const coldkey=/^5[1-9A-HJ-NP-Za-km-z]{45,47}$/;
+const prefix=/^5[1-9A-HJ-NP-Za-km-z]{2,47}$/;
+const token=document.querySelector('meta[name="watchlist-token"]').content;
+const state={wallets:new Map(), remote:new Map(), drafts:new Map(), selected:null,focused:null,
+  scope:'all',limit:40,scanCount:0,census:null,searchMessage:'',searchTimer:null,
+  searchRequest:null,searchSerial:0,initialError:'',busy:new Set(),loading:false};
+const explicit=new Set(['watch','mute','auto']);
+const ranked=value=>value!==null&&value!==undefined&&value!==false&&value!=='';
+const number=value=>typeof value==='number'&&Number.isFinite(value);
+const format=value=>number(value)?value.toLocaleString(undefined,{maximumFractionDigits:2}):'Unknown';
+const pct=value=>number(value)?(value*100).toFixed(1)+'%':'Unknown';
+function pnl(value){return number(value)?(value>0?'+':'')+format(value):'Unknown';}
+function short(a){return a.length>16?a.slice(0,7)+'…'+a.slice(-5):a;}
+function human(value){return String(value).replaceAll('_',' ');}
+function items(values){return Array.isArray(values)?values:[];}
+function choice(w){return explicit.has(w.choice)?w.choice:'auto';}
+function watching(w){return choice(w)==='watch'||(choice(w)==='auto'&&w.automatic===true);}
+function choiceLabel(w){return choice(w)==='watch'?'Watch':choice(w)==='mute'?'Muted':watching(w)?'Auto · watching':'Auto · off';}
+function node(tag,text,className){
+  const el=document.createElement(tag);
+  if(text!==undefined)el.textContent=text;
+  if(className)el.className=className;
+  return el;
+}
+function msg(el,text,error=false){el.textContent=text;el.classList.toggle('error',error);}
+function draftFor(w){return state.drafts.get(w.address)||{choice:choice(w),label:w.label||'',note:w.note||''};}
+function changed(w,d){return choice(w)!==d.choice||(w.label||'')!==d.label||(w.note||'')!==d.note;}
+function getWallet(a){return state.wallets.get(a)||state.remote.get(a)||(state.focused?.address===a?state.focused:null);}
+function day(stamp){
+  if(!stamp)return 'Unknown';
+  const date=new Date(stamp);
+  return Number.isNaN(date.valueOf())?'Unknown':date.toISOString().slice(0,16).replace('T',' ')+' UTC';
+}
+function stub(address){return {address,inspected:false,automatic:false,choice:'auto',label:'',note:''};}
+function index(rows){
+  return new Map(items(rows).filter(w=>w&&typeof w.address==='string').map(w=>[w.address,w]));
+}
+function matches(w,query){
+  if(query&&!w.address.toLowerCase().includes(query)&&!(w.label||'').toLowerCase().includes(query))return false;
+  if(state.scope==='watching'&&!watching(w)||state.scope==='muted'&&choice(w)!=='mute')return false;
+  const filter=ui.filter.value;
+  if(filter==='inspected')return w.inspected;
+  if(filter==='uninspected')return !w.inspected;
+  if(filter==='gaps'||filter==='screens')return items(w[filter]).length>0;
+  return filter==='all'||ranked(w[filter]);
+}
+function rankValue(w,field){
+  if(field==='both')return number(w.known_realized)&&number(w.known_open)?w.known_realized+w.known_open:null;
+  return w[field];
+}
+function ordered(wallets){
+  const field=ui.sort.value;
+  return wallets.sort((a,b)=>{
+    if(field==='research'){
+      const rank=w=>w.inspected?2:choice(w)!=='auto'||w.automatic?1:0;
+      const diff=rank(b)-rank(a);
+      if(diff)return diff;
+    } else if(field==='checked_at'){
+      const diff=String(b.checked_at||'').localeCompare(String(a.checked_at||''));
+      if(diff)return diff;
+    } else if(field!=='address'){
+      const av=rankValue(a,field),bv=rankValue(b,field),left=number(av),right=number(bv);
+      if(left!==right)return left?-1:1;
+      if(left&&av!==bv)return bv-av;
+    }
+    return a.address.localeCompare(b.address);
+  });
+}
+function list(){
+  const query=ui.query.value.trim().toLowerCase();
+  const union=new Map([...state.remote,...state.wallets]);
+  const found=ordered([...union.values()].filter(w=>matches(w,query)));
+  const fragment=document.createDocumentFragment();
+  const field=['both','known_open'].includes(ui.sort.value)?ui.sort.value:'known_realized';
+  document.querySelector('thead th.right').textContent=field==='both'?'Known P/L (TAO)':field==='known_open'?'Open TAO':'Realized TAO';
+  for(const w of found.slice(0,state.limit)){
+    const row=node('tr');row.classList.toggle('selected',w.address===state.selected);
+    const name=node('td'),pick=node('button',w.label||short(w.address),'walletpick');
+    pick.type='button';pick.title=w.address;
+    pick.setAttribute('aria-label','Inspect '+(w.label?w.label+' ':'')+w.address);
+    if(w.label)pick.append(node('span',short(w.address),'smalladdr mono'));
+    else pick.classList.add('mono');
+    pick.onclick=()=>select(w,true);
+    name.append(pick);
+    const amount=rankValue(w,field),profit=node('td',pnl(amount),'right');
+    if(number(amount)&&amount!==0)profit.classList.add(amount>0?'positive':'negative');
+    row.append(name,node('td',w.inspected?'Inspected':'Uninspected','small'),profit,node('td',choiceLabel(w),'state'));
+    fragment.append(row);
+  }
+  ui.rows.replaceChildren(fragment);
+  ui.more.hidden=state.limit>=found.length;
+  ui.more.textContent='Show more wallets ('+(found.length-state.limit)+' remaining)';
+  ui['list-empty'].hidden=Boolean(found.length)||state.loading;
+  ui['list-empty'].textContent=query?'No matches for this search and filter. You can add a full coldkey.':
+    'No wallets match this filter. Try All wallets or add an address.';
+  const status=state.initialError||state.searchMessage||(!state.loading?found.length.toLocaleString()+' matching wallets':'');
+  msg(ui['list-status'],status,Boolean(state.initialError));
+  document.querySelectorAll('[data-scope]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.scope===state.scope)));
+}
+function reportScope(){
+  const all=[...state.wallets.values()];
+  const inspected=all.filter(w=>w.inspected).length;
+  const scans=number(state.scanCount)?format(state.scanCount)+' saved scan'+(state.scanCount===1?'':'s'):'saved scans';
+  ui.coverage.textContent=inspected.toLocaleString()+' wallets with inspected history across '+scans+
+    '. '+(number(state.census)?'Search '+format(state.census)+' registry addresses by prefix.':'Registry totals unavailable.');
+}
+function metric(label,value,alert){
+  const box=node('div');box.append(node('dt',label));
+  const n=node('dd',value);
+  if(number(alert)&&alert)n.className=alert>0?'positive':'negative';
+  box.append(n);return box;
+}
+function evidenceBlock(title,words){
+  if(!words.length)return;
+  const ul=node('ul');
+  words.forEach(text=>ul.append(node('li',text)));
+  ui.evidence.append(node('h3',title),ul);
+}
+function updateSave(w){
+  const d=draftFor(w),dirty=changed(w,d);
+  ui.save.disabled=!dirty||state.busy.has(w.address);
+  return dirty;
+}
+function select(w,move){
+  state.selected=w.address;state.focused=w;ui.choose.hidden=true;ui.detail.hidden=false;
+  ui['detail-title'].textContent=w.label||short(w.address);
+  ui['full-address'].textContent=w.address;
+  ui.taostats.href='https://taostats.io/account/'+encodeURIComponent(w.address);
+  ui['research-state'].textContent=w.inspected?'History inspected · '+day(w.checked_at):
+    'History uninspected. Saving a monitoring preference does not collect past trades.';
+  const unresolved=w.unresolved_sale_proceeds??w.unresolved_sale_proceeds_tao;
+  const tao=v=>number(v)?pnl(v)+' TAO':'Unknown';
+  ui.specs.replaceChildren(metric('Recorded fills',number(w.fills)?format(w.fills):'Unknown'),
+    metric('Held value with confirmed cost',pct(w.basis_fraction)),
+    metric('Known realized P/L',tao(w.known_realized),w.known_realized),
+    metric('Known open P/L',tao(w.known_open),w.known_open));
+  ui['basis-help'].textContent=number(unresolved)?'Sale proceeds with unresolved cost: '+format(unresolved)+' TAO.':
+    'P/L covers units with a known acquisition cost. Missing data is shown as unknown.';
+  ui.evidence.replaceChildren();
+  const ranks=node('div',undefined,'ranks');
+  for(const [k,name] of [['profit_rank','Realized P/L'],['open_rank','Open P/L'],['buy_rank','Buy timing'],['sell_rank','Sell timing']]){
+    ranks.append(node('span',name+' · '+(number(w[k])?'#'+w[k]:ranked(w[k])?'Ranked':'Unranked')));
+  }
+  ui.evidence.append(node('h3','Scan rankings'),ranks);
+  if(w.positions?.length){
+    ui.evidence.append(node('h3','Held subnet positions'));
+    const pos=node('ul');
+    for(const p of w.positions){
+      const price=v=>number(v)?v.toLocaleString(undefined,{maximumFractionDigits:8}):'unknown';
+      const known=p.alpha>0?100*p.known_alpha/p.alpha:0;
+      pos.append(node('li','SN'+p.netuid+' · '+format(p.alpha)+' α · '+format(known)+
+        '% traced · entry on traced units '+price(p.known_buy_price_tao)+' TAO/α · mark '+
+        price(p.current_quote?p.price_tao:null)+' TAO/α'));
+    }
+    ui.evidence.append(pos);
+  }
+  if(w.examples?.length){
+    ui.evidence.append(node('h3','Recent trade receipts'));
+    const receipts=node('ul');
+    for(const e of w.examples){
+      if(!/^\d+-\d+$/.test(e.extrinsic||''))continue;
+      const link=node('a',day(e.time)+' · SN'+e.netuid+' '+e.kind+' · '+format(e.tao)+' TAO');
+      link.href='https://taostats.io/extrinsic/'+e.extrinsic;
+      link.target='_blank';link.rel='noopener noreferrer';
+      const li=node('li');li.append(link);receipts.append(li);
+    }
+    ui.evidence.append(receipts);
+  }
+  evidenceBlock('Screening',items(w.screens).map(human));
+  evidenceBlock('Evidence gaps',items(w.gaps).map(human));
+  const d=draftFor(w);
+  [...ui.edit.elements.choice].forEach(r=>{r.checked=r.value===d.choice;});
+  ui.label.value=d.label;ui.note.value=d.note;
+  const reasons=items(w.reasons).map(human).join(', ');
+  ui['auto-reason'].textContent='Automatic monitoring is '+(w.automatic?'on':'off')+
+    (reasons?' ('+reasons+')': '')+'. Watch always includes this address. Mute overrides automatic monitoring.';
+  msg(ui['save-status'],updateSave(w)?'Unsaved changes':'');
+  list();
+  if(move){
+    ui['detail-title'].focus({preventScroll:true});
+    if(window.matchMedia('(max-width:850px)').matches)ui['detail-title'].scrollIntoView({block:'start'});
+  }
+}
+async function load(){
+  if(state.loading)return;
+  state.loading=true;ui.reload.disabled=true;
+  try{
+    const res=await fetch('/api/watchlist',{cache:'no-store'});
+    if(!res.ok)throw new Error('Could not load the local watchlist.');
+    const data=await res.json();
+    if(!Array.isArray(data.wallets))throw new Error('The local watchlist response was incomplete.');
+    state.wallets=index(data.wallets);state.scanCount=data.scan_count;state.census=data.census_rows;
+    state.initialError='';reportScope();const selected=getWallet(state.selected);
+    const first=ordered([...state.wallets.values()])[0];
+    if(selected||first)select(selected||first,false);
+  }catch(error){
+    state.initialError='The local watchlist could not be loaded. Use Refresh to retry.';
+    if(!state.wallets.size)ui.coverage.textContent='Local research unavailable.';
+  }finally{state.loading=false;ui.reload.disabled=false;list();}
+}
+function search(){
+  const query=ui.query.value.trim();
+  state.limit=40;state.searchSerial++;state.searchMessage='';state.remote.clear();
+  const serial=state.searchSerial;
+  clearTimeout(state.searchTimer);state.searchRequest?.abort();
+  if(prefix.test(query)){
+    state.searchMessage='Checking the registry…';
+    state.searchTimer=setTimeout(async()=>{
+      const controller=new AbortController();state.searchRequest=controller;
+      try{
+        const response=await fetch('/api/search?q='+encodeURIComponent(query),
+          {cache:'no-store',signal:controller.signal});
+        if(!response.ok)throw new Error('Search unavailable');
+        const data=await response.json();if(serial!==state.searchSerial)return;
+        state.remote=index(data.wallets);state.searchMessage='';
+      }catch(error){
+        if(serial!==state.searchSerial||error.name==='AbortError')return;
+        state.searchMessage='Registry search unavailable. Saved wallets are still shown.';
+      }
+      list();
+    },250);
+  }
+  list();
+}
+ui.edit.addEventListener('input',()=>{
+  const w=getWallet(state.selected);if(!w)return;
+  const d={choice:ui.edit.elements.choice.value,label:ui.label.value,note:ui.note.value};
+  if(changed(w,d))state.drafts.set(w.address,d);else state.drafts.delete(w.address);
+  msg(ui['save-status'],updateSave(w)?'Unsaved changes':'');
+});
+ui.edit.addEventListener('submit',async event=>{
+  event.preventDefault();const w=getWallet(state.selected);if(!w||state.busy.has(w.address))return;
+  const payload={address:w.address,...draftFor(w)};state.busy.add(w.address);
+  ui.save.disabled=true;msg(ui['save-status'],'Saving…');
+  try{
+    const res=await fetch('/api/watchlist',{method:'POST',headers:{'Content-Type':'application/json','X-Watchlist-Token':token},
+      body:JSON.stringify(payload)});
+    const body=await res.json();
+    if(!res.ok||body.ok!==true)throw new Error(typeof body.error==='string'?body.error:'Unable to save this wallet.');
+    const saved={...w,...payload};
+    state.wallets.set(w.address,saved);
+    const pending=state.drafts.get(w.address);
+    if(pending&&!changed(saved,pending))state.drafts.delete(w.address);
+    reportScope();list();
+    if(state.selected===w.address){select(saved,false);msg(ui['save-status'],updateSave(saved)?'New unsaved changes':'Saved on this PC.');}
+  }catch(error){
+    if(state.selected===w.address)msg(ui['save-status'],error.message||'Unable to save. Please retry.',true);
+  }finally{
+    state.busy.delete(w.address);const selected=getWallet(state.selected);if(selected)updateSave(selected);
+  }
+});
+ui.query.addEventListener('input',search);
+ui.filter.onchange=ui.sort.onchange=()=>{state.limit=40;list();};
+document.querySelectorAll('[data-scope]').forEach(b=>b.onclick=()=>{state.scope=b.dataset.scope;state.limit=40;list();});
+ui.more.onclick=()=>{state.limit+=40;list();};
+ui.reload.onclick=load;
+ui.add.onclick=()=>{
+  ui['new-address'].value=coldkey.test(ui.query.value.trim())?ui.query.value.trim():'';
+  msg(ui['add-error'],'');ui['add-dialog'].showModal();ui['new-address'].focus();
+};
+ui['cancel-add'].onclick=()=>ui['add-dialog'].close();
+ui['add-form'].onsubmit=event=>{
+  event.preventDefault();const a=ui['new-address'].value.trim();
+  if(!coldkey.test(a)){msg(ui['add-error'],'Enter a full Bittensor coldkey beginning with 5.',true);return;}
+  const existing=getWallet(a),w=existing||stub(a);
+  if(!existing){state.wallets.set(a,w);state.drafts.set(a,{choice:'watch',label:'',note:''});}
+  ui['add-dialog'].close();select(w,true);
+};
+load();
+</script></body></html>

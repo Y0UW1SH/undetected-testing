@@ -325,6 +325,39 @@ def test_watchlist_reports_keep_discovery_picks_until_revoked_or_replaced():
     assert reasons == {A: ["sell_timing"]}
 
 
+def test_refresh_with_receipts_replaces_old_signal_and_watches_open_winner():
+    from seo.tao_local_watch import _selection
+    discovery = dict(mode="discovery", checked_at="2026-11-01T00:00:00Z",
+                     performance={"rankings": {"sell": [A], "profit": [B]}})
+    _, state = _selection(discovery, [])
+    report = dict(mode="watchlist", checked_at="2026-11-02T00:00:00Z",
+                  following=[A], coverage={A: {"account": "complete",
+                                               "transactions": "complete"}},
+                  performance={"rankings": {"sell": [], "open": [A],
+                                            "open_partial": [HOT]}})
+    reasons, state = _selection(report, [], state)
+    assert reasons == {A: ["followed", "open_profit"], B: ["realized_profit"]}
+    assert state["sell"] == [] and HOT not in reasons
+
+
+def test_startup_replays_reclassified_wallet(tmp_path):
+    from seo.tao_local_watch import _selection, _cached_discovery
+    reports = [dict(mode="discovery", performance={"rankings": {"sell": [A]}}),
+               dict(mode="watchlist",
+                    coverage={A: {"account": "complete",
+                                  "transactions": "partial"}},
+                    performance={"rankings": {"buy": [A]}}),
+               dict(mode="watchlist", coverage={}, performance={})]
+    for i, report in enumerate(reports, 1):
+        report["performance"]["wallets"] = []
+        report["checked_at"] = f"2026-11-0{i}T00:00:00Z"
+        folder = tmp_path / str(i)
+        folder.mkdir()
+        (folder / "tao_collect.json").write_text(json.dumps(report))
+    reasons, _ = _selection(reports[-1], [], None, _cached_discovery(tmp_path))
+    assert reasons == {A: ["buy_timing"]}
+
+
 def test_cached_discovery_respects_intervening_watchlist_screens(tmp_path):
     from seo.tao_local_watch import _cached_discovery, _selection
 

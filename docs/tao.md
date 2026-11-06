@@ -213,9 +213,24 @@ then `watch_wallets.cmd` on your PC. The launcher checks GitHub for a newer
 completed wallet report on startup and about every six hours while running.
 It can continue from a downloaded report when GitHub is unreachable. The
 `gh` CLI must be signed in locally to download Actions artifacts.
-The watcher uses the screened watchlist and up to three early-entry and
-three timely-exit candidates from the most recent discovery. A timing
-signal does not establish profit when the wallet's purchase cost is missing.
+Open `edit_watchlist.cmd` to browse wallets researched across downloaded
+scans, search captured directory addresses, or paste a Finney coldkey.
+**Watch** adds the address to local monitoring, **Mute** excludes it even
+when suggested automatically, and **Automatic** restores normal selection.
+Labels, notes, and choices stay on this PC in
+`try_tao_out/local_watchlist.sqlite`. The monitor reads them on its next poll.
+Adding an address starts forward observation; it doesn't fetch its historical
+buy prices. The wallet collection workflow handles that separately.
+
+Automatic selection uses the screened GitHub watchlist plus up to three
+leaders each for realized profit, open profit, early buys and timely exits.
+Reports with partial cost show the known portion separately. An inspected
+wallet's older timing label can be removed when a later scan no longer
+supports it; a timing signal alone doesn't establish a profit.
+To record recent network movements alongside watched-wallet alerts, pass
+`--movement-archive` to the local watcher. It saves recognized successful
+movements from the same blocks, using the existing RPC budget. Run
+`python -m seo.tao_movement_archive --top 10` to see actual local coverage.
 To use a local endpoint file, put the Finney HTTPS and WSS URLs on separate
 lines in `dwellir.txt` and run `watch_wallets.cmd --endpoint-file dwellir.txt`.
 The watcher reads it on this PC; Git ignores the file. Without a file or

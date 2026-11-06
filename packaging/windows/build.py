@@ -19,7 +19,9 @@ SOURCE = Path(__file__).resolve().parent
 REPO = SOURCE.parents[1]
 MODULES = ("__init__.py", "tao_view.py", "wallet_view.html",
            "tao_portable.py", "tao_local_watch.py", "tao_chain_census.py",
-           "tao_chain_window.py", "tao_network_view.py")
+           "tao_chain_window.py", "tao_network_view.py", "tao_watchlist.py",
+           "watchlist_editor.html", "tao_directory_view.py",
+           "tao_movement_archive.py")
 
 
 def sha(path):
@@ -209,6 +211,27 @@ def build(cache, output, offline):
     print(f"{output} ({output.stat().st_size:,} bytes)\nSHA256 {digest}")
 
 
+def write_kit(installer, target):
+    """Bundle only the setup, checked digest and installation guide."""
+    digest_file = installer.with_suffix(".exe.sha256")
+    expected = f"{sha(installer)}  {installer.name}"
+    if (installer.suffix.lower() != ".exe" or target.suffix.lower() != ".zip"
+            or digest_file.read_text("ascii").strip() != expected):
+        raise ValueError("Use the verified installer and its SHA-256 file")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staged = target.with_name(f".kit-{uuid.uuid4().hex}.zip")
+    try:
+        with zipfile.ZipFile(staged, "x", zipfile.ZIP_STORED) as kit:
+            for path in (installer, digest_file, SOURCE / "README.md"):
+                kit.write(path, path.name)
+        with zipfile.ZipFile(staged) as kit:
+            if kit.testzip():
+                raise ValueError("Installer kit verification failed")
+        staged.replace(target)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--cache", type=Path,
@@ -216,8 +239,12 @@ def main():
     p.add_argument("--output", type=Path, default=REPO / "dist" / "windows"
                    / "StealthWalletMonitor-Setup-x64.exe")
     p.add_argument("--offline", action="store_true")
+    p.add_argument("--kit", type=Path,
+                   help="also create a clean ZIP containing setup and guide")
     args = p.parse_args()
     build(args.cache.resolve(), args.output.resolve(), args.offline)
+    if args.kit is not None:
+        write_kit(args.output.resolve(), args.kit.resolve())
 
 
 if __name__ == "__main__":

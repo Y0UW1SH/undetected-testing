@@ -38,6 +38,13 @@ Intermediate full runs upload a small JSON report for one day. Manual runs
 and terminal full runs offer the SQLite result and JSON for three days.
 The checkpoint branch keeps the cumulative data after artifacts expire.
 
+On this PC, double-click `view_tao_directory.cmd` to download the latest saved
+checkpoint and open `github_out/accounts.html`. Use `-Offline` to reuse your
+last download, or `-Follow -NoOpen` to update the view as new checkpoints
+arrive (up to 12 hours). This command doesn't start GitHub jobs. The directory
+shows holders and their balances; only the smaller group joined to wallet
+history has evidence for trading performance.
+
 ## Restore a local SQLite database
 
 From a normal code checkout with project requirements installed, clone the

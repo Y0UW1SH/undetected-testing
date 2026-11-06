@@ -22,7 +22,9 @@ td button{padding:3px 7px;font-family:ui-monospace,monospace;font-size:14px}
 .pos{color:#00633e}.neg{color:#97372a}.empty{padding:18px 0;border-bottom:1px solid var(--line)}
 .note{color:var(--muted);font-size:13px}.up{margin-top:25px}summary{cursor:pointer;padding:10px 0}
 [hidden]{display:none!important}@media(max-width:640px){main{padding-top:16px}nav button{font-size:13px}th,td{padding:6px 8px}}
-</style></head><body><main><header><h1>Wallet ledger</h1><p id="stamp"></p></header>
+</style></head><body><main><header><h1>Wallet ledger</h1><p id="stamp"></p>
+<p><a href="http://127.0.0.1:8749/">Manage my watchlist &amp; browse researched wallets</a> · <a href="accounts.html">Search the captured directory</a></p>
+<p>Rankings below use this scan. Open the watchlist to browse wallets from all downloaded scans, including those without a profit flag. If the editor is closed, run <b>edit_watchlist.cmd</b> on this PC.</p></header>
 <nav aria-label="View"><button id="bwallet" aria-pressed="true">Wallets</button><button id="bfeed" aria-pressed="false">Watchlist activity</button></nav>
 <section id="list"><h2>Wallet results</h2><div class="controls">
 <label>Show<select id="board"><option value="all">Inspected wallets</option><option value="buy">Buys before rises</option><option value="sell">Sales before drops</option><option value="open">Open gains with verified cost</option><option value="partial">Open gains with partial cost</option><option value="profit">Realized winners</option><option value="profit_partial">Sales with partial cost</option></select></label>
@@ -202,7 +204,7 @@ grid(s,['Time','Wallet','Movement','Subnet','Alpha','TAO','Extrinsic'],rc.map(e=
 if(R.local_feed){const f=R.local_feed;add(s,'h3','Local finalized activity');const state=add(s,'p');
 const describe=()=>{let stale=Date.now()-Date.parse(f.checked_at)>1000*(f.stale_after_seconds||660);state.textContent='Status: '+(stale?'stale snapshot — refresh this file or check the watcher':(f.status||'unknown'))+' · Checked '+time(f.checked_at)+' · Last scanned block '+num(f.last_scanned_block,0)+' · '+num(f.lag_blocks,0)+' blocks behind. Stake changes are observations; the next Taostats pass reconciles trades and cost.'};describe();setInterval(describe,60000);
 if(f.selection_reasons){
-  const labels={followed:'Saved watchlist',buy_timing:'Buys before rises',sell_timing:'Sales before falls',manual:'Added locally'};
+  const labels={followed:'Saved watchlist',buy_timing:'Buys before rises',sell_timing:'Sales before falls',realized_profit:'Realized profit leader',open_profit:'Open profit leader',personal:'My watchlist',manual:'Added locally'};
   const selected=Object.entries(f.selection_reasons);
   if(selected.some(([,reasons])=>reasons.some(r=>r==='buy_timing'||r==='sell_timing'))){
     const date=f.timing_selection?.discovery_at;

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+import webbrowser
 
 
 APP = Path(__file__).resolve().parent
@@ -24,10 +25,11 @@ def data_root():
     return Path(location or local / "StealthWalletMonitor" / "Data").resolve()
 
 
-def stop_event_name(root):
+def stop_event_name(root, role="monitor"):
     path = os.path.normcase(str(root)).encode("utf8")
     key = hashlib.sha256(path).hexdigest()
-    return "Local\\StealthWalletMonitor-" + key[:32]
+    name = "Local\\StealthWalletMonitor-" + key[:32]
+    return name if role == "monitor" else name + "-Editor"
 
 
 def kernel():
@@ -44,9 +46,9 @@ def kernel():
     return k
 
 
-def running(root, stop=False):
+def running(root, stop=False, role="monitor"):
     k = kernel()
-    handle = k.OpenEventW(2, False, stop_event_name(root))
+    handle = k.OpenEventW(2, False, stop_event_name(root, role))
     if not handle:
         if ctypes.get_last_error() == 2:
             return False
@@ -59,14 +61,16 @@ def running(root, stop=False):
     return True
 
 
-def worker(root, run):
+def worker(root, run, role="monitor"):
     k = kernel()
-    handle = k.CreateEventW(None, True, False, stop_event_name(root))
+    handle = k.CreateEventW(None, True, False, stop_event_name(root, role))
     err = ctypes.get_last_error()
     if not handle:
         raise ctypes.WinError(err)
     if err == 183:
         k.CloseHandle(handle)
+        if role == "editor":
+            return reopen_editor(root)
         print("The local monitor is already running.")
         return 0
     done = threading.Event()
@@ -89,19 +93,58 @@ def worker(root, run):
         k.CloseHandle(handle)
 
 
-def stop_monitor(root):
-    if not running(root, stop=True):
-        print("The local monitor is stopped.")
+def stop_monitor(root, role="monitor"):
+    label = "local monitor" if role == "monitor" else "watchlist editor"
+    if not running(root, stop=True, role=role):
+        print(f"The {label} is stopped.")
         return 0
     end = time.monotonic() + 20
     while time.monotonic() < end:
-        if not running(root):
-            print("Stopped the local monitor.")
+        if not running(root, role=role):
+            print(f"Stopped the {label}.")
             return 0
         time.sleep(.2)
-    print("The monitor is finishing its current poll. You can also press "
-          "Ctrl+C in its console.", file=sys.stderr)
+    print(f"The {label} is still stopping.", file=sys.stderr)
     return 1
+
+
+def reopen_editor(root, port=8749):
+    from seo.tao_watchlist import same_instance
+    if not same_instance(root, port):
+        raise RuntimeError("The editor is starting or another data folder "
+                           "owns the local port. Try again after it closes.")
+    webbrowser.open(f"http://127.0.0.1:{port}/")
+    print("Opened the local watchlist.")
+    return 0
+
+
+def edit_watchlist(root):
+    from seo.tao_watchlist import same_instance
+    if same_instance(root, 8749):
+        return reopen_editor(root)
+    info = subprocess.STARTUPINFO()
+    info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    info.wShowWindow = 0
+    # A dedicated hidden console lets the installer signal this editor alone.
+    proc = subprocess.Popen(
+        [str(PYTHON), "-B", str(Path(__file__)), "editor-worker"], cwd=root,
+        env=dict(github_environment(), STEALTH_WALLET_DATA=str(root)),
+        creationflags=subprocess.CREATE_NEW_CONSOLE, startupinfo=info,
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL)
+    end = time.monotonic() + 12
+    while time.monotonic() < end:
+        if same_instance(root, 8749):
+            print("Opened the local watchlist.")
+            return 0
+        if proc.poll() is not None:
+            if proc.returncode == 0:
+                return 0
+            raise RuntimeError("The watchlist could not open. Close any "
+                               "other editor on local port 8749 and retry.")
+        time.sleep(.15)
+    raise RuntimeError("The editor has not opened. Check the data directory "
+                       "and local port 8749.")
 
 
 def open_report(root):
@@ -188,6 +231,16 @@ def open_transfers(root):
 def execute(args, root):
     if args.command == "open":
         return open_report(root)
+    if args.command == "edit-watchlist":
+        return edit_watchlist(root)
+    if args.command == "editor-worker":
+        from seo.tao_watchlist import main as editor
+        try:
+            return worker(root, lambda: editor(["--open"]), role="editor")
+        except KeyboardInterrupt:
+            return 0
+    if args.command == "stop-editor":
+        return stop_monitor(root, role="editor")
     if args.command == "transfers":
         return open_transfers(root)
     if args.command == "import-explorer":
@@ -248,6 +301,7 @@ def execute(args, root):
         from substrateinterface import SubstrateInterface
         from seo import tao_local_watch, tao_portable, tao_view
         from seo import tao_chain_census, tao_chain_window, tao_network_view
+        from seo import tao_directory_view, tao_movement_archive, tao_watchlist
         report = {"performance": {"wallets": [], "rankings": {}}}
         assert callable(tao_local_watch.poll) and callable(tao_portable.main)
         assert callable(tao_chain_census.main) and callable(
@@ -256,6 +310,10 @@ def execute(args, root):
             tao_network_view.build()).lower()
         assert "<!doctype html>" in tao_view.render(report).lower()
         assert SubstrateInterface
+        assert callable(tao_directory_view.main)
+        assert callable(tao_movement_archive.report)
+        assert callable(tao_watchlist.server)
+        assert (APP / "seo/watchlist_editor.html").is_file()
         subprocess.run([str(GH), "--version"], check=True, timeout=15,
                        env=github_environment())
         print("Offline viewer, migration and local watcher imports passed.")
@@ -267,7 +325,8 @@ def main(argv=None):
     subs = p.add_subparsers(dest="command", required=True)
     for command in ("open", "transfers", "download", "login", "start", "stop",
                     "status",
-                    "worker", "self-test"):
+                    "worker", "self-test", "edit-watchlist", "editor-worker",
+                    "stop-editor"):
         subs.add_parser(command)
     for command in ("import", "export"):
         sp = subs.add_parser(command)

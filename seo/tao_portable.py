@@ -125,7 +125,7 @@ def _feed(path):
                    for e in data["events"])
             or not isinstance(data.get("timing_selection", {}), dict)
             or set(data.get("timing_selection", {}))
-            - {"discovery_at", "buy", "sell"}
+            - {"discovery_at", "buy", "sell", "profit", "open", "revoked"}
             or not isinstance(data.get("snapshot_refresh", {}), dict)
             or set(data.get("snapshot_refresh", {}))
             - {"checked_at", "status"}):

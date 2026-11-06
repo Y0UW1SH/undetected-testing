@@ -22,6 +22,24 @@ Python runtime, GitHub CLI, and local watcher dependencies.
    on that monitor. Setup does not start it. To move its private activity and
    checkpoint, stop it, tick **Include private local activity and checkpoint**
    on both export and import, and transport the ZIP privately.
+4. Choose **Edit watchlist** to add or mute coldkeys and save private labels
+   and notes. The editor opens in your browser on this PC. Clicking it again
+   reopens the editor for this data folder. If port 8749 belongs to an editor
+   for a different data folder, close that editor first. The monitor reads
+   your choices from the installed data folder on each poll.
+
+### Move private watch preferences
+
+The report backup and its optional activity feed are separate from your
+watch choices. To transfer your choices to a fresh installation, stop the
+monitor and run `app\wallet-monitor.cmd stop-editor` in the old installation.
+For a source checkout, close the editor console. Privately copy only
+`try_tao_out\local_watchlist.sqlite` from its data folder. On the new PC,
+stop the monitor and editor, create `try_tao_out` inside the new data folder,
+and place the file there. If that file already exists on the new PC, keep it
+and enter the desired choices in **Edit watchlist**. The SQLite file contains
+private wallet selections, labels and notes. Configure provider and GitHub
+credentials separately on each PC.
 
 By default files live in `%LOCALAPPDATA%\Programs\StealthWalletMonitor`; saved
 reports and monitoring data live in `%LOCALAPPDATA%\StealthWalletMonitor\Data`.
@@ -30,7 +48,8 @@ your data. A custom data root can be set with `STEALTH_WALLET_DATA` before
 opening the launcher. The command-line entry point is `app\wallet-monitor.cmd`
 inside the installation, with `--help` for commands. The setup is unsigned.
 
-The bundled Python also supports `-m seo.tao_network_view` for making a new
+The installed CLI also supports `edit-watchlist` and `stop-editor`.
+The bundled Python supports `-m seo.tao_network_view` for making a new
 explorer from an existing census SQLite file, report JSONs or transfer window.
 The optional `-m seo.tao_chain_census` and `-m seo.tao_chain_window` commands
 have `--help` for running bounded local chain scans explicitly. Run these
@@ -51,11 +70,14 @@ from the URLs in `sources.json`. It downloads only wheel hashes and versions in
 `watch-wheels.txt` and uses the Windows .NET Framework C# compiler for the
 launcher. Build inputs are cached under the ignored `try_tao_out/packager`.
 Use `--offline` to rebuild entirely from that verified cache. Setup and its
-SHA-256 file are written to `dist/windows`. The smoke test installs into an
+SHA-256 file are written to `dist/windows`. Add
+`--kit dist/windows/StealthWalletMonitor-Kit.zip` for a ZIP containing the
+installer, its SHA-256 file and this guide. The smoke test installs into an
 isolated temporary directory using `/S /NOINTEGRATION /D=<path>`, verifies the
 bundled viewer/dependencies, round-trips two offline snapshots, starts and
 stops an idle test process, opens and closes the native launcher, checks the
-transfer explorer with offline data, and uninstalls. Use `--backup` and
+transfer explorer with offline data, reads and writes an isolated watchlist
+over loopback, and uninstalls. Use `--backup` and
 `--explorer` with the smoke test to verify an actual migration kit. It runs
 offline with Start menu and uninstall registration disabled.
 

@@ -81,6 +81,13 @@ FunctionEnd
     SetErrorLevel 2
     Abort
   ${EndIf}
+  IfFileExists "$INSTDIR\app\seo\tao_watchlist.py" 0 stopped
+  ExecWait '"$INSTDIR\app\runtime\python.exe" -B "$INSTDIR\app\wallet_monitor.py" stop-editor' $0
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONSTOP "Close the watchlist editor and try again." /SD IDOK
+    SetErrorLevel 2
+    Abort
+  ${EndIf}
   stopped:
 !macroend
 
