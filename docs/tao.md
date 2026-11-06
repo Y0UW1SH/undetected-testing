@@ -216,8 +216,10 @@ It can continue from a downloaded report when GitHub is unreachable. The
 The watcher uses the screened watchlist and up to three early-entry and
 three timely-exit candidates from the most recent discovery. A timing
 signal does not establish profit when the wallet's purchase cost is missing.
-The watcher asks for your Dwellir key in a masked console if it isn't
-already set locally. Leave that console
+To use a local endpoint file, put the Finney HTTPS and WSS URLs on separate
+lines in `dwellir.txt` and run `watch_wallets.cmd --endpoint-file dwellir.txt`.
+The watcher reads it on this PC; Git ignores the file. Without a file or
+local environment variable, the watcher asks in a masked console. Leave that console
 running; refresh the HTML to see its latest successful block, lag, and
 movements. It reads finalized blocks and resumes from its local checkpoint.
 It cannot send five-minute updates while the PC is asleep or off. Local

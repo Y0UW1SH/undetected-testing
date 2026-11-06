@@ -9,6 +9,22 @@ B = "5" + "B" * 47
 HOT = "5" + "H" * 47
 
 
+def test_local_endpoint_file_reads_matching_pair_and_rejects_other_hosts(
+        tmp_path):
+    from seo import tao_local_watch as watcher
+    location = tmp_path / "private.txt"
+    base = "api-bittensor-mainnet.n.dwellir.com/test-only"
+    location.write_text("https://" + base + "\nwss://" + base,
+                        encoding="utf-8-sig")
+    assert watcher._file_endpoint(location) == "wss://" + base
+    for bad in ("wss://example.org/test-only", "wss://" + base + "?k=bad",
+                "https://" + base + "\nwss://" + base + "-different"):
+        location.write_text(bad, encoding="utf8")
+        with pytest.raises(watcher.WatchError) as error:
+            watcher._file_endpoint(location)
+        assert "test-only" not in str(error.value)
+
+
 def evt(name, attrs, module="SubtensorModule", ex=2):
     return SimpleNamespace(value=dict(module_id=module, event_id=name,
                                       attributes=attrs, extrinsic_idx=ex))

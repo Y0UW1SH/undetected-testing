@@ -71,6 +71,30 @@ def _failure(stage, exc):
     return dict(stage=stage, type=kind)
 
 
+def _file_endpoint(path):
+    """Read a local endpoint without putting its value in process arguments."""
+    try:
+        with path.open("r", encoding="utf-8-sig") as src:
+            value = src.read(4097)
+        urls = [line.strip() for line in value.splitlines() if line.strip()]
+        if not 1 <= len(urls) <= 2 or len(value) > 4096:
+            raise ValueError
+        keys, schemes = set(), set()
+        for url in urls:
+            match = re.fullmatch(r"(https|wss)://" + re.escape(HOST)
+                                 + r"(?::443)?/([a-zA-Z0-9_-]+)", url)
+            if not match or match[1] in schemes:
+                raise ValueError
+            schemes.add(match[1])
+            keys.add(match[2])
+        if len(keys) != 1:
+            raise ValueError
+        return "wss://%s/%s" % (HOST, keys.pop())
+    except (ValueError, OSError):
+        raise WatchError("Cannot read the local endpoint file. Use matching "
+                         "Finney HTTPS/WSS URLs, one per line.") from None
+
+
 def _endpoint(prompt):
     url = os.environ.get("DWELLIR_WS_URL")
     if url:
@@ -677,7 +701,10 @@ def _run(args):
                 addresses = sorted(reasons)
                 if addresses:
                     if url is None:
-                        url = _endpoint(args.prompt)
+                        if args.endpoint_file:
+                            url = _file_endpoint(args.endpoint_file)
+                        else:
+                            url = _endpoint(args.prompt)
                     feed = _poll_cycle(url, feed, addresses, args.max_blocks,
                                        args.rpc_limit, notices)
                 else:
@@ -742,6 +769,8 @@ def main(argv=None):
     p.add_argument("--once", action="store_true", help="run one poll and exit")
     p.add_argument("--prompt", action="store_true",
                    help="ask for a masked key if it is missing locally")
+    p.add_argument("--endpoint-file", type=Path,
+                   help="file with local Finney WSS/HTTPS URLs, one per line")
     args = p.parse_args(argv)
     args.cached_report = not args.report and (
         args.cached_report or args.refresh_snapshots)

@@ -170,3 +170,6 @@ seo/config/keywords.json
 out/
 try_tao_out/
 github_out/
+
+# Private, user-supplied local RPC endpoints
+dwellir.txt

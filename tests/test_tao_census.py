@@ -1,7 +1,33 @@
 """Checkpointed coverage of the public Accounts directory."""
+import json
+import shutil
 import sqlite3
+import subprocess
+
+import pytest
 
 from seo.sources import tao_census as census
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="pager test needs Node")
+def test_page_100_does_not_open_rows_per_page_menu():
+    # Page 100 and the Rows menu can have identical visible button text.
+    js = """
+    let clicked;
+    function button(text, menu=false) {
+      return {innerText:text,disabled:false,
+        click:()=>{clicked=menu?'size':text},
+        getAttribute:k=>k==='aria-haspopup' && menu?'menu':null,
+        getClientRects:()=>[{}]};
+    }
+    const buttons=[button('100',true),button('...'),button('Next')];
+    const grid={querySelector:()=>true,querySelectorAll:()=>buttons};
+    const document={querySelectorAll:()=>[grid]};
+    """
+    select = census.tao_holders.SELECT_PAGE.replace("PAGE", "100")
+    code = js + "eval(" + json.dumps(select) + ");console.log(clicked)"
+    result = subprocess.check_output(["node", "-e", code], text=True)
+    assert result.strip() == "..."
 
 
 def page(n, total, addresses, *, size=2, block=100):

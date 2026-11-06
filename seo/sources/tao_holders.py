@@ -64,7 +64,9 @@ SELECT_PAGE = """
   for (let n = grid; n; n = n.parentElement) {
     const buttons = [...n.querySelectorAll('button')];
     if (!buttons.some(b => b.innerText.trim() === 'Next')) continue;
-    const page = buttons.find(b => b.innerText.trim() === String(target));
+    const page = buttons.find(b => b.innerText.trim() === String(target)
+      && b.getAttribute('aria-haspopup') !== 'menu' && !b.disabled
+      && b.getClientRects().length);
     if (page && !page.disabled) { page.click(); return true; }
     const jump = buttons.find(b => b.innerText.trim() === '...');
     if (!jump || jump.disabled) return false;
