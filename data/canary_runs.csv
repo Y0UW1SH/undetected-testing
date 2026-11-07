@@ -9,3 +9,8 @@ id,query,outcome,detail,fetched_at
 8,best pizza near me,ok,best pizza near me - Google Search,2026-11-06T16:55:36+00:00
 9,how to tie a tie,ok,how to tie a tie - Google Search,2026-11-06T16:55:43+00:00
 10,convert 5 km to miles,ok,convert 5 km to miles - Google Search,2026-11-06T16:55:50+00:00
+11,weather tomorrow,ok,weather tomorrow - Google Search,2026-11-07T15:53:52+00:00
+12,python list comprehension,ok,python list comprehension - Google Search,2026-11-07T15:53:58+00:00
+13,best pizza near me,ok,best pizza near me - Google Search,2026-11-07T15:54:04+00:00
+14,how to tie a tie,ok,how to tie a tie - Google Search,2026-11-07T15:54:11+00:00
+15,convert 5 km to miles,ok,convert 5 km to miles - Google Search,2026-11-07T15:54:17+00:00
