@@ -1,61 +1,61 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-06T19:39:52+00:00",
-  "previous_run": "2026-11-06T12:25:28+00:00",
+  "checked_at": "2026-11-07T00:17:35+00:00",
+  "previous_run": "2026-11-06T19:39:52+00:00",
   "alerts": [
     {
-      "netuid": 36,
-      "name": "Weir",
-      "kind": "price_down",
+      "netuid": 58,
+      "name": "Attune",
+      "kind": "price_up",
       "field": "price",
-      "old": 0.012207,
-      "new": 0.010705,
-      "change_pct": -12.3
+      "old": 0.009921,
+      "new": 0.010983,
+      "change_pct": 10.7
     },
     {
-      "netuid": 38,
-      "name": "ChronoLLM",
-      "kind": "price_down",
-      "field": "price",
-      "old": 0.005704,
-      "new": 0.005128,
-      "change_pct": -10.1
-    },
-    {
-      "netuid": 38,
-      "name": "ChronoLLM",
-      "kind": "mcap_down",
+      "netuid": 58,
+      "name": "Attune",
+      "kind": "mcap_up",
       "field": "market cap",
-      "old": 12740.0,
-      "new": 11460.0,
-      "change_pct": -10.05
+      "old": 8420.0,
+      "new": 9350.0,
+      "change_pct": 11.05
+    },
+    {
+      "netuid": 70,
+      "name": "Fugal",
+      "kind": "price_up",
+      "field": "price",
+      "old": 0.006788,
+      "new": 0.007678,
+      "change_pct": 13.11
+    },
+    {
+      "netuid": 70,
+      "name": "Fugal",
+      "kind": "mcap_up",
+      "field": "market cap",
+      "old": 498.12,
+      "new": 573.68,
+      "change_pct": 15.17
     },
     {
       "netuid": 92,
       "name": "REAX",
       "kind": "price_up",
       "field": "price",
-      "old": 0.018028,
-      "new": 0.025666,
-      "change_pct": 42.37
+      "old": 0.025666,
+      "new": 0.028407,
+      "change_pct": 10.68
     },
     {
       "netuid": 92,
       "name": "REAX",
       "kind": "mcap_up",
       "field": "market cap",
-      "old": 7570.0,
-      "new": 10820.0,
-      "change_pct": 42.93
-    },
-    {
-      "netuid": 99,
-      "name": "Thirty Spokes",
-      "kind": "gone",
-      "field": null,
-      "old": 0.000841,
-      "new": null,
-      "change_pct": null
+      "old": 10820.0,
+      "new": 12010.0,
+      "change_pct": 11.0
     }
   ]
 }
