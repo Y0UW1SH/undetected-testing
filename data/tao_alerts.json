@@ -1,79 +1,25 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-07T20:27:46+00:00",
-  "previous_run": "2026-11-07T15:05:36+00:00",
+  "checked_at": "2026-11-07T23:54:48+00:00",
+  "previous_run": "2026-11-07T20:27:46+00:00",
   "alerts": [
     {
-      "netuid": 70,
-      "name": "Fugal",
+      "netuid": 76,
+      "name": "Ormas",
       "kind": "price_up",
       "field": "price",
-      "old": 0.009442,
-      "new": 0.010551,
-      "change_pct": 11.75
+      "old": 0.003152,
+      "new": 0.003696,
+      "change_pct": 17.26
     },
     {
-      "netuid": 70,
-      "name": "Fugal",
+      "netuid": 76,
+      "name": "Ormas",
       "kind": "mcap_up",
       "field": "market cap",
-      "old": 746.63,
-      "new": 850.98,
-      "change_pct": 13.98
-    },
-    {
-      "netuid": 92,
-      "name": "REAX",
-      "kind": "price_up",
-      "field": "price",
-      "old": 0.0275,
-      "new": 0.032734,
-      "change_pct": 19.03
-    },
-    {
-      "netuid": 92,
-      "name": "REAX",
-      "kind": "mcap_up",
-      "field": "market cap",
-      "old": 11740.0,
-      "new": 14020.0,
-      "change_pct": 19.42
-    },
-    {
-      "netuid": 100,
-      "name": "Cortex",
-      "kind": "price_up",
-      "field": "price",
-      "old": 0.003047,
-      "new": 0.003355,
-      "change_pct": 10.11
-    },
-    {
-      "netuid": 100,
-      "name": "Cortex",
-      "kind": "mcap_up",
-      "field": "market cap",
-      "old": 6350.0,
-      "new": 6990.0,
-      "change_pct": 10.08
-    },
-    {
-      "netuid": 109,
-      "name": "Finsight",
-      "kind": "price_down",
-      "field": "price",
-      "old": 0.002152,
-      "new": 0.001935,
-      "change_pct": -10.08
-    },
-    {
-      "netuid": 109,
-      "name": "Finsight",
-      "kind": "mcap_down",
-      "field": "market cap",
-      "old": 3490.0,
-      "new": 3140.0,
-      "change_pct": -10.03
+      "old": 1020.0,
+      "new": 1200.0,
+      "change_pct": 17.65
     }
   ]
 }
