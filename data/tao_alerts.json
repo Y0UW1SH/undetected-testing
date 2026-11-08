@@ -1,16 +1,25 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-08T06:38:52+00:00",
-  "previous_run": "2026-11-07T23:54:48+00:00",
+  "checked_at": "2026-11-08T15:33:32+00:00",
+  "previous_run": "2026-11-08T06:38:51+00:00",
   "alerts": [
     {
-      "netuid": 116,
-      "name": "Carbon",
+      "netuid": 70,
+      "name": "Fugal",
+      "kind": "price_up",
+      "field": "price",
+      "old": 0.010293,
+      "new": 0.011481,
+      "change_pct": 11.54
+    },
+    {
+      "netuid": 70,
+      "name": "Fugal",
       "kind": "mcap_up",
       "field": "market cap",
-      "old": 8150.0,
-      "new": 8980.0,
-      "change_pct": 10.18
+      "old": 862.08,
+      "new": 994.04,
+      "change_pct": 15.31
     }
   ]
 }
