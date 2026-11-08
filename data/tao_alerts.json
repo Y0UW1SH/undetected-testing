@@ -1,25 +1,16 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-07T23:54:48+00:00",
-  "previous_run": "2026-11-07T20:27:46+00:00",
+  "checked_at": "2026-11-08T06:38:52+00:00",
+  "previous_run": "2026-11-07T23:54:48+00:00",
   "alerts": [
     {
-      "netuid": 76,
-      "name": "Ormas",
-      "kind": "price_up",
-      "field": "price",
-      "old": 0.003152,
-      "new": 0.003696,
-      "change_pct": 17.26
-    },
-    {
-      "netuid": 76,
-      "name": "Ormas",
+      "netuid": 116,
+      "name": "Carbon",
       "kind": "mcap_up",
       "field": "market cap",
-      "old": 1020.0,
-      "new": 1200.0,
-      "change_pct": 17.65
+      "old": 8150.0,
+      "new": 8980.0,
+      "change_pct": 10.18
     }
   ]
 }
