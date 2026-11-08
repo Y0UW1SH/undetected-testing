@@ -1,25 +1,25 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-08T15:33:32+00:00",
-  "previous_run": "2026-11-08T06:38:51+00:00",
+  "checked_at": "2026-11-08T20:44:46+00:00",
+  "previous_run": "2026-11-08T15:33:32+00:00",
   "alerts": [
     {
-      "netuid": 70,
-      "name": "Fugal",
-      "kind": "price_up",
+      "netuid": 78,
+      "name": "Umi",
+      "kind": "price_down",
       "field": "price",
-      "old": 0.010293,
-      "new": 0.011481,
-      "change_pct": 11.54
+      "old": 0.000975,
+      "new": 0.000801,
+      "change_pct": -17.85
     },
     {
-      "netuid": 70,
-      "name": "Fugal",
-      "kind": "mcap_up",
+      "netuid": 78,
+      "name": "Umi",
+      "kind": "mcap_down",
       "field": "market cap",
-      "old": 862.08,
-      "new": 994.04,
-      "change_pct": 15.31
+      "old": 1600.0,
+      "new": 1310.0,
+      "change_pct": -18.12
     }
   ]
 }
