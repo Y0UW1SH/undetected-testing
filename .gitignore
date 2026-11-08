@@ -173,3 +173,9 @@ github_out/
 
 # Private, user-supplied local RPC endpoints
 dwellir.txt
+
+# Private local-runner environment / optional checkout-local state
+.venv-local/
+local_data/
+*.sqlite-wal
+*.sqlite-shm

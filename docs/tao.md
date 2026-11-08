@@ -1,3 +1,6 @@
+> Windows collection and scheduling now run locally. Start with
+> [the Windows migration guide](local-windows.md); all hosted workflows are removed.
+
 # `tao`: Bittensor subnet stats and price warnings from taostats.io
 
 Collects the subnet table from https://taostats.io/subnets with the
@@ -59,17 +62,17 @@ default). Use `--netuids 8,64` for specific subnets. `--top 20` selects
 up to 20 discovered candidates. `--top 0` selects all discovered
 candidates. Followed wallets are included even when they fall
 outside the selection. Include a specific wallet with `--address <address>`
-(repeatable), or enter additional addresses in the workflow's **addresses**
+(repeatable); use the private local job configuration for recurring inputs.
 input. The collector checks incoming stake to find the purchasing wallet
 and follows outgoing stake up to `--link-depth` hops (default 2).
 Linked wallets can add to the wallet count. `--new-wallets`
 limits these extra visits to 10 per pass by default. The report lists any
 `deferred_recipients` and gives the market page's `recent_trades_status`.
-Large scans can exceed a single GitHub job's time limit.
+Keep scans bounded so one run does not monopolize the local browser.
 
 On the project PC, `collect_tao.cmd --addresses-only --address <wallet>`
 runs the same collector in local Chrome and writes the database and report
-in `try_tao_out/`. Use `--history-pages 15` to look farther back for an
+in the private local runner root. Use `--history-pages 15` to look farther back for an
 original purchase. `--max-balance-tao` and `--max-activity-24h` also bound
 further link discovery. For known native transactions, pass e.g.
 `--extrinsic 9344821-0027:198,199` to verify the Taostats detail pages
@@ -79,7 +82,7 @@ independently. These records do not imply wallet history coverage.
 checkpoint in the same database as the rows, refreshes recent activity, and
 continues older history on the next run. It reads at most three additional
 pages to refresh and validate overlap. Keep the same database between runs;
-GitHub Actions restores it from the data branch automatically. A limit of 1
+Import the historical database once before local collection. A limit of 1
 is useful for checking site access. Raising the limit retrieves older activity
 faster when the site serves it. Set `--delay 2`
 for a fixed pause or `--delay 2-4` for a range in seconds. To set the
@@ -101,7 +104,7 @@ performance, open the collector's `tao_collect.json` report.
 * `coverage` records what loaded for each account in this pass. A complete
   empty result means the site returned no rows. Partial means the scan
   reached a page limit or could read only part of the history. Unavailable
-  means the tab supplied no usable result. The workflow saves partial data and flags the run if
+  means the tab supplied no usable result. The local runner saves partial data and flags the run if
   every attempted wallet lacks readable data for either history tab.
   Each tab reports rows fetched this run (including overlap), newly added
   rows, cumulative stored rows, the observed source total, and remaining rows.
@@ -199,115 +202,23 @@ Earlier runs preserve the evidence and thresholds used at the time.
   and latest observed extrinsic when available. Each address keeps its
   own profit and ranks, even when its acquisition cost follows the stake.
 
-## Run the wallet collector on GitHub
+## Run collection and monitoring locally
 
-For a local wallet view, run `view_wallets_github.cmd` (or supply an Actions
-run ID as its first argument). This downloads the GitHub wallet artifact,
-caches it under `github_out/<run>/`, and opens `github_out/wallets.html`.
-To open it again offline, open the HTML directly. To render a saved JSON
-without GitHub or Taostats, run `python -m seo.tao_view --input PATH`.
-The view includes all inspected accounts below the screens, even when their
-trading record is incomplete. Select a wallet to inspect the sale receipts,
-positions, acquisition prices, transfers, and quotes behind the timing scores.
+Follow [Windows setup, migration and scheduling](local-windows.md). Import the
+saved wallet artifact before collecting, then use `run_local.cmd collect`,
+`run_local.cmd view`, `run_local.cmd edit` and `run_local.cmd watch`.
+The watcher reads local reports every five minutes and never refreshes GitHub.
+No runtime data is committed to this public repository.
 
-The realized column includes gross gain/loss on the confirmed fraction of
-partially costed sales. Unknown-cost proceeds are separately identified, never
-booked as gains. Same-wallet moves between validators are not market trades.
-Only confirmed native moves keep confirmed cost on the moved units; ambiguous
-pairs cannot establish a new purchase price. Open positions can qualify
-without a sale. Open gains on traceable fractions are shown separately from
-fully costed holdings. The source account keeps its trading history even when
-stake moves; the receiving account inherits the traceable acquisition cost.
+The viewer keeps inspected accounts even when their history is incomplete.
+Known-cost gains and unknown-cost proceeds remain separate. Native movements
+and transfer evidence are not automatically sales or proof of common ownership.
+The local monitor observes forward activity; collection checks historical costs.
 
-The daily GitHub watchlist reconciliation uses Taostats only. Specify
-`watch_addresses` on a manual collection to save wallets on the data branch.
-Use `holders_only` for a smaller follow-up on selected subnets: the
-collector samples their Holders tabs and opens those accounts without
-rechecking unrelated metagraphs, traders or previously followed accounts.
-The first readable check of each tab sets a baseline; subsequent checks
-record indexed movements, and an unreadable interval remains marked as a gap.
-An outgoing TAO transfer is not sale proceeds just because it followed a sale.
-
-For a five-minute movement feed, run `watch_wallets.cmd --setup` once and
-then `watch_wallets.cmd` on your PC. The launcher checks GitHub for a newer
-completed wallet report on startup and about every six hours while running.
-It can continue from a downloaded report when GitHub is unreachable. The
-`gh` CLI must be signed in locally to download Actions artifacts.
-Open `edit_watchlist.cmd` to browse wallets researched across downloaded
-scans, search captured directory addresses, or paste a Finney coldkey.
-**Watch** adds the address to local monitoring, **Mute** excludes it even
-when suggested automatically, and **Automatic** restores normal selection.
-Labels, notes, and choices stay on this PC in
-`try_tao_out/local_watchlist.sqlite`. The monitor reads them on its next poll.
-Adding an address starts forward observation; it doesn't fetch its historical
-buy prices. The wallet collection workflow handles that separately.
-
-The **Groups** tab shows documented transfers, funding leads and inferred links
-separately. Select individual members or watch a small group together. Broad
-networks require selecting up to 24 members; existing mutes, labels and notes are
-preserved. A link does not establish shared ownership. Group profit remains
-partial when members have incomplete costs or different observation dates.
-See [native discovery and evidence](tao-native-evidence.md) for subnet coverage,
-research priorities and local accounting corrections.
-
-Automatic selection uses the screened GitHub watchlist plus up to three
-leaders each for realized profit, open profit, early buys and timely exits.
-Reports with partial cost show the known portion separately. An inspected
-wallet's older timing label can be removed when a later scan no longer
-supports it; a timing signal alone doesn't establish a profit.
-To record recent network movements alongside watched-wallet alerts, pass
-`--movement-archive` to the local watcher. It saves recognized successful
-movements from the same blocks, using the existing RPC budget. Run
-`python -m seo.tao_movement_archive --top 10` to see actual local coverage.
-To use a local endpoint file, put the Finney HTTPS and WSS URLs on separate
-lines in `dwellir.txt` and run `watch_wallets.cmd --endpoint-file dwellir.txt`.
-The watcher reads it on this PC; Git ignores the file. Without a file or
-local environment variable, the watcher asks in a masked console. Leave that console
-running; refresh the HTML to see its latest successful block, lag, and
-movements. It reads finalized blocks and resumes from its local checkpoint.
-It cannot send five-minute updates while the PC is asleep or off. Local
-stake increases/decreases are observations; the Taostats data confirms
-trades, stake transfers, and entry prices. The GitHub workflow never installs
-or calls Dwellir. See [Dwellir's Bittensor limits](https://www.dwellir.com/docs/bittensor).
-
-Open **Actions → Bittensor wallet collection → Run workflow** and choose
-`master`. For the first run, enter `8` for **netuids**, `2` for **top**
-and `1` for **history_pages**, or run:
-
-```bash
-gh workflow run tao-collect.yml --ref master -f netuids=8 -f top=2 -f history_pages=1 -f delay=2-4
-```
-
-If the wallet verification widget stays pending, the artifact can include
-one screenshot of the public page and its query state in the JSON.
-The run summary shows tab coverage, rows read, screened rankings and up
-to five recent transfers with the evidence for each move. It shows fully
-priced and unresolved sales separately. Download
-**wallet-collection** for the JSON report and
-SQLite database. Select the **runner** when dispatching. The default
-`ubuntu-latest` runs headed Chrome on a 1366×768 Xvfb virtual display.
-Choose `windows-latest` to run Chrome directly on a standard Windows
-runner, or pass `-f runner=windows-latest` to the command above. Both
-runners share the saved wallet history. The workflow has a 90-minute
-time limit and keeps downloadable artifacts for three days. It saves
-wallet history to `wallets.sqlite` on the dedicated
-`tao-wallet-data` branch so it can be restored after artifact expiry.
-The repository must allow Actions to write that branch. This repository
-is public, so the followed addresses and saved results are public too.
-
-GitHub charges no runner time for standard hosted runners on public
-repositories. Private repositories draw eligible runner time from the
-owner's included compute allowance, and storage has its own allowance.
-The CLI can also run directly on a local computer. [GitHub Actions
-billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
-
-## Schedule
-
-`.github/workflows/tao.yml` runs `tao watch` every 4 hours, commits
-`data/tao.sqlite`, `data/subnet_stats.csv`, `data/tao_report.html` and
-`data/tao_alerts.json` back to the repo, and uploads them as an artifact.
-Dispatch it by hand with a threshold and netuids. Set a `TAO_PROXY`
-secret (`user:pass@host:port`) to route through a proxy.
+Census, holder-only discovery and watchlist reconciliation remain separate,
+bounded jobs. Use the existing CLI flags in the private `config/local.json`.
+All six hosted workflows, including CI, have been removed. Existing public
+history remains public; workflow removal does not erase it.
 
 ## Parser notes
 
@@ -321,7 +232,7 @@ run saves nothing, capture the live page and compare it with
 
 ```bash
 seo capture taostats --out data/live_taostats.html
-# or dispatch the SEO tracking workflow with capture_extra "taostats:"
+# run capture explicitly; there is no hosted workflow
 ```
 
 
@@ -334,5 +245,5 @@ The parser reads the grid's `col-id` cells (`price`,
 columns by row index. It was validated against a live capture from a
 GitHub Actions runner; the grid shows about 25 rows at a time, so
 `tao subnets` scrolls the grid viewport and merges rows by netuid until
-no new ones appear. Refresh the fixture with the SEO workflow's
+no new ones appear. Refresh the fixture with the explicit SEO CLI
 `capture_extra` input (`taostats:`) or `seo capture taostats --out ...`.

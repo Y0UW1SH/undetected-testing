@@ -1,9 +1,11 @@
 @echo off
+rem Compatibility filename only: view this PC's local reports, without GitHub.
 setlocal
 cd /d "%~dp0"
-set "PY=python"
-if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
-set "RUN=%~1"
-if "%RUN%"=="" set "RUN=latest"
-"%PY%" -m seo.tao_view --github "%RUN%" || exit /b 1
-start "" "%CD%\github_out\wallets.html"
+echo This compatibility command now opens local wallet reports.
+if /i "%~1"=="latest" goto :latest
+call "%~dp0run_local.cmd" view %*
+exit /b %errorlevel%
+:latest
+call "%~dp0run_local.cmd" view
+exit /b %errorlevel%

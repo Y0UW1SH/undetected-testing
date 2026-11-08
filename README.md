@@ -1,5 +1,9 @@
 # undetected-testing
 
+**Windows-first local runner:** all GitHub Actions workflows have been removed.
+Start with [Windows setup, migration and scheduling](docs/local-windows.md).
+No automatic collection or data uploads run from this repository.
+
 Testing [SeleniumBase](https://github.com/seleniumbase/SeleniumBase) stealth for bypassing bot-detection.
 
 E.g. Scraping Walmart from GitHub Actions:
@@ -24,28 +28,18 @@ SeleniumBase CDP Mode bypasses bot-detection on multiple sites:
 
 --------
 
-## How the CI works
+## Run checks locally
 
-All checks live in one workflow, `.github/workflows/ci.yml`:
+There are no hosted test or collector workflows. Test source and browser
+examples remain for manual use. See [local setup](docs/local-windows.md).
 
-* A `lint` job runs flake8.
-* A `stealth` matrix job runs groups of `raw_*.py` scripts on Ubuntu x86,
-  Ubuntu ARM64, and macOS. Each group is one matrix entry with a list of
-  scripts; add a script to CI by appending a line to the right group.
-* Every script ends with an assertion (`sb.assert_true(...)`,
-  `sb.assert_element(...)`, or a plain `assert`) that fails if the site
-  blocked the browser or returned no data, so a green run means stealth
-  actually worked, not just that the script exited.
-* All scripts in a group run even if one fails; the failures are listed at
-  the end of the step. Screenshots and logs are uploaded as artifacts.
-
-Run a script locally the same way CI does:
-
-```bash
-pip install -r requirements.txt
-seleniumbase install chromedriver
-python raw_walmart.py --debug
+```bat
+setup_local.cmd
+.venv-local\Scripts\python.exe -m pytest tests\ -q
+.venv-local\Scripts\python.exe -m flake8 . --exclude=.venv-local,temp
 ```
+
+Historical screenshots above show older hosted runs, not active automation.
 
 --------
 
@@ -57,9 +51,9 @@ python raw_walmart.py --debug
 | `research` | Product research: search results and price-change alerts | Amazon, eBay | [docs/research.md](docs/research.md) |
 | `tao`      | Bittensor subnet prices, wallet timing, transferred cost basis and local movement monitoring | Taostats and optional local Finney RPC | [Collector](docs/tao.md) · [Data sources](docs/tao-sources.md) · [Windows installer](packaging/windows/README.md) |
 
-Each tool has its own command, config file, SQLite database and GitHub
-Actions schedule (`seo.yml`, `research.yml`, `tao.yml`), so they can be
-run and triggered independently. One install provides all three:
+Each tool has its own command, config file and SQLite database. Use the
+local runner to keep data private and optionally schedule jobs on your PC.
+One install provides all three:
 
 ```bash
 python -m pip install --upgrade pip wheel setuptools
@@ -159,9 +153,9 @@ config, 3 Google challenged the session, 4 browser stack not installed
 
 Results are stored in `data/seo.sqlite` (one table per record type) and
 a query is skipped if it was already fetched today unless `--force` is
-given. `.github/workflows/seo.yml` runs the canary plus the batch config
-daily and commits the CSV exports. Set a `SEO_PROXY` repository secret
-(`user:pass@host:port`) to route the scraper through a proxy.
+given. The local runner keeps its database and exports under your private
+data root. Canary/capture commands are optional manual checks. There is no
+Actions schedule or automatic CSV commit.
 
 Parsers are unit-tested offline against HTML in `tests/fixtures/`
 (`pytest tests/`). The Maps feed, Maps place page and Google's

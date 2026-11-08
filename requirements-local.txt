@@ -1,0 +1,4 @@
+# Windows local runner dependencies; install alongside the editable project.
+substrate-interface==1.8.1
+pytest>=8
+flake8>=7,<8

@@ -155,7 +155,7 @@ def test_watch_checks_at_start_and_six_hours_even_after_timeout(
     assert watch.main(["--refresh-snapshots"]) == 130
     assert checks == [0., 6 * 3600]
     assert len(polls) == 73 and all(a == [A] for _, a in polls)
-    assert report(2)["checked_at"] in Path("github_out/wallets.html"
+    assert report(2)["checked_at"] in Path("try_tao_out/wallets.html"
                                            ).read_text(encoding="utf8")
 
 
