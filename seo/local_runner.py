@@ -9,6 +9,7 @@ import shutil
 import sqlite3
 import sys
 import webbrowser
+import zipfile
 
 from seo import local_state as state
 
@@ -63,6 +64,8 @@ def invoke(module, argv):
 
 def _options(root, job, extra):
     config = json.loads((root / 'config/local.json').read_text('utf8'))
+    if not isinstance(config, dict):
+        raise state.StateError('Local configuration must be a JSON object.')
     values = config.get(job, DEFAULTS[job])
     if not isinstance(values, list) or not all(isinstance(v, str)
                                                for v in values):
@@ -100,20 +103,24 @@ def _commands(root, staging, job, options):
     config = 'keywords' if job == 'seo' else 'research'
     command = 'batch' if job == 'seo' else 'track'
     report_name = 'seo_report.html' if job == 'seo' else 'research_report.html'
+    report_folder = staging / 'data' if job == 'seo' else staging
     return [(module, [*base, command, *options,
                       '--config', str(root / 'config' / (config + '.json'))]),
-            (module, [*base, 'report', '--out', str(staging / report_name)]),
+            (module, [*base, 'report', '--out',
+             str(report_folder / report_name)]),
             (module, [*base, 'export', '--dir', str(staging)])]
 
 
 def _publish(root, staging, job):
-    files = list(staging.glob('*.json')) + list(staging.glob('*.html'))
-    files += list(staging.glob('*.csv'))
-    files += list((staging / 'data').glob('*.json'))
+    files = [path for folder in (staging, staging / 'data')
+             for suffix in ('json', 'html', 'csv')
+             for path in folder.glob('*.' + suffix)]
+    if len({path.name for path in files}) != len(files):
+        raise state.StateError('Ambiguous output names; prior reports kept.')
     required = {'collect': 'tao_collect.json', 'census': 'account-census.json',
                 'subnets': 'tao_report.html', 'seo': 'seo_report.html',
                 'research': 'research_report.html'}[job]
-    if not (staging / required).is_file():
+    if not any(path.name == required for path in files):
         raise state.StateError('No usable report produced; prior report kept.')
     # Validate all files before replacing any current view.
     for path in files:
@@ -250,6 +257,10 @@ def main(argv=None):
         sub.add_parser(name)
     imp = sub.add_parser('import-artifact')
     imp.add_argument('zip', type=Path)
+    compare = sub.add_parser('compare-artifacts')
+    compare.add_argument('left', type=Path)
+    compare.add_argument('right', type=Path)
+    compare.add_argument('--to', type=Path, required=True)
     restore = sub.add_parser('restore')
     restore.add_argument('backup', type=Path)
     restore.add_argument('--to', type=Path, required=True)
@@ -276,6 +287,12 @@ def main(argv=None):
                 return int(exc.code or 0)
         if args.command in JOBS:
             return run_job(root, args.command, extra, wait=args.wait)
+        if args.command == 'compare-artifacts':
+            from seo.local_reconcile import preserve_and_compare
+            preserve_and_compare(args.left, args.right, args.to)
+            print('Both originals preserved and compared in %s. '
+                  'No database merged or selected.' % args.to)
+            return 0
         if args.command == 'restore':
             state.restore(args.backup, args.to.expanduser().resolve())
             print('Restored into %s' % args.to)
@@ -325,7 +342,7 @@ def main(argv=None):
         return 0
     except (state.StateError, FileExistsError) as exc:
         print(str(exc), file=sys.stderr)
-    except (OSError, ValueError, sqlite3.Error):
+    except (OSError, ValueError, sqlite3.Error, zipfile.BadZipFile):
         print('Could not read or write local state. Originals kept.',
               file=sys.stderr)
     return 2

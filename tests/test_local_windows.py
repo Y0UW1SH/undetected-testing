@@ -69,3 +69,30 @@ def test_scheduler_preserves_root_and_opt_in_jobs():
 
 def test_scheduled_collectors_wait_for_other_jobs():
     assert "--wait 21600" in read("tools/schedule_local.ps1")
+
+
+def test_launchers_disable_inherited_delayed_expansion():
+    # With cmd /V:ON, exclamation marks in paths or arguments otherwise
+    # expand as variables even inside double quotes.
+    for name in ('setup_local.cmd', 'run_local.cmd', 'collect_tao.cmd',
+                 'edit_watchlist.cmd', 'run_tao_github.cmd',
+                 'view_tao_directory.cmd', 'view_wallets_github.cmd',
+                 'watch_wallets.cmd'):
+        script = read(name)
+        assert 'setlocal DisableDelayedExpansion' in script
+        assert script.index('DisableDelayedExpansion') < script.index('%~dp0')
+
+
+def test_scheduler_normalizes_directory_spelling_before_instance_hash():
+    # Trailing separators must not change the install/status/remove task.
+    # Preserve drive/UNC roots rather than turning C:\\ into drive-relative C:.
+    script = read('tools/schedule_local.ps1')
+    assert 'function Normalize-Directory' in script
+    assert '[IO.Path]::GetPathRoot($full)' in script
+    assert '$full.Length -gt $volume.Length' in script
+    assert "$full.TrimEnd('\\')" in script
+    assert ("$Repo = Normalize-Directory (Join-Path $PSScriptRoot '..')"
+            in script)
+    assert '$Root = Normalize-Directory $Root' in script
+    assert script.index('$Root = Normalize-Directory $Root') < script.index(
+        '$sha =')

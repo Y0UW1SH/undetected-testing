@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal DisableDelayedExpansion
 if not exist "%~dp0.venv-local\Scripts\python.exe" (
     echo Run setup_local.cmd first to create the local Python environment.
     exit /b 1

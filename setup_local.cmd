@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal DisableDelayedExpansion
 pushd "%~dp0" || exit /b 1
 py -3.13 -c "import sys; assert sys.version_info[:2] == (3, 13)" >nul 2>&1
 if errorlevel 1 (

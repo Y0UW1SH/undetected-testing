@@ -75,7 +75,10 @@ def test_restore_rejects_manifest_traversal(tmp_path):
 def test_artifact_import_preserves_original_and_refuses_existing_data(
         tmp_path):
     source = tmp_path / 'source.sqlite'
-    database(source).close()
+    with database(source) as db:
+        db.execute('CREATE TABLE wallet_events '
+                   '(id TEXT PRIMARY KEY, payload TEXT)')
+    db.close()
     report = {'checked_at': '2026-11-07T10:39:51+00:00',
               'performance': {'wallets': []}}
     archive = tmp_path / 'artifact.zip'
@@ -118,11 +121,11 @@ def test_failed_copy_does_not_leave_partial_database(tmp_path, monkeypatch):
     src, dst = tmp_path / 'src.sqlite', tmp_path / 'dst.sqlite'
     database(src).close()
 
-    def fail_copy(source, out, length):
-        out.write(b'partial')
+    def fail_publish(source, destination):
         raise OSError('disk full')
 
-    monkeypatch.setattr(state.shutil, 'copyfileobj', fail_copy)
+    function = 'rename' if state.os.name == 'nt' else 'link'
+    monkeypatch.setattr(state.os, function, fail_publish)
     with pytest.raises(OSError):
         state.sqlite_copy(src, dst)
     assert not dst.exists()
@@ -138,3 +141,59 @@ def test_backup_restore_keeps_local_snapshot_history(tmp_path):
     state.restore(saved, restored)
     assert (restored / report.relative_to(root)).read_bytes() == (
         report.read_bytes())
+
+
+def test_sqlite_copy_publishes_only_a_complete_verified_file(
+        tmp_path, monkeypatch):
+    src, dst = tmp_path / 'src.sqlite', tmp_path / 'dst.sqlite'
+    database(src).close()
+    linked = []
+    original_link = state.os.link
+
+    def link_complete(temporary, destination):
+        assert not destination.exists()
+        with sqlite3.connect(temporary) as db:
+            assert db.execute('PRAGMA quick_check').fetchone() == ('ok',)
+        linked.append(destination)
+        return original_link(temporary, destination)
+
+    monkeypatch.setattr(state.os, 'link', link_complete)
+    state.sqlite_copy(src, dst)
+    if state.os.name != 'nt':
+        assert linked == [dst]
+
+
+def test_failed_import_rolls_back_new_live_files_and_allows_retry(
+        tmp_path, monkeypatch):
+    from tests.test_local_reconcile import artifact
+    archive = artifact(tmp_path, 'source', [('a', '{}')])
+    root = tmp_path / 'root'
+    original_write = state.atomic_write
+
+    def fail_report(path, data):
+        if path == root / 'reports/tao_collect.json':
+            raise OSError('disk full')
+        return original_write(path, data)
+
+    monkeypatch.setattr(state, 'atomic_write', fail_report)
+    with pytest.raises(OSError):
+        state.import_artifact(archive, root)
+    assert not (root / 'wallets.sqlite').exists()
+    assert not (root / 'reports/tao_collect.json').exists()
+    assert next((root / 'imports').glob('*/original.zip')).is_file()
+    monkeypatch.setattr(state, 'atomic_write', original_write)
+    state.import_artifact(archive, root)
+    assert (root / 'wallets.sqlite').is_file()
+
+
+def test_backup_does_not_follow_allowlisted_directory_symlinks(tmp_path):
+    root, outside = tmp_path / 'root', tmp_path / 'outside'
+    root.mkdir()
+    outside.mkdir()
+    (outside / 'secrets.json').write_text('{"private": true}')
+    try:
+        (root / 'config').symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip('directory symlinks unavailable on this system')
+    saved = state.backup(root)
+    assert not (saved / 'config/secrets.json').exists()

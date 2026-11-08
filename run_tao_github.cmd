@@ -1,7 +1,7 @@
 @echo off
 rem Compatibility filename only: collect subnets on this PC, without GitHub.
 rem Legacy arguments: run_tao_github.cmd [netuids] [threshold]
-setlocal
+setlocal DisableDelayedExpansion
 cd /d "%~dp0"
 echo This compatibility command now collects subnets locally.
 set "THRESH=%~2"

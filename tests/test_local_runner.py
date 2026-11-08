@@ -131,3 +131,48 @@ def test_all_job_commands_parse_with_existing_clis(tmp_path):
             cli = __import__(module, fromlist=['build_parser'])
             parsed = cli.build_parser().parse_args(argv)
             assert parsed.db == str(tmp_path / runner.DATABASES[job])
+
+
+def test_seo_heatmaps_stay_with_report_and_are_published(
+        tmp_path, monkeypatch):
+    runner.initialize(tmp_path)
+
+    def fake(module, argv):
+        if 'batch' in argv:
+            data = Path.cwd() / 'data'
+            data.mkdir()
+            (data / 'grid_business.html').write_text('<html>heatmap</html>')
+        if 'report' in argv:
+            out = Path(argv[argv.index('--out') + 1])
+            assert (out.parent / 'grid_business.html').is_file()
+            out.write_text('<a href="grid_business.html">heatmap</a>')
+        return 0
+
+    monkeypatch.setattr(runner, 'invoke', fake)
+    assert runner.run_job(tmp_path, 'seo', []) == 0
+    assert (tmp_path / 'reports/grid_business.html').is_file()
+    assert 'grid_business.html' in (
+        tmp_path / 'reports/seo_report.html').read_text()
+
+
+def test_non_object_config_fails_without_starting_collection(
+        tmp_path, monkeypatch):
+    runner.initialize(tmp_path)
+    (tmp_path / 'config/local.json').write_text('[]')
+    monkeypatch.setattr(runner, 'invoke', lambda *args:
+                        (_ for _ in ()).throw(AssertionError('must not run')))
+    assert runner.run_job(tmp_path, 'collect', []) == 2
+
+
+def test_compare_command_preserves_both_without_initializing_default_root(
+        tmp_path, monkeypatch):
+    from tests.test_local_reconcile import artifact
+    left = artifact(tmp_path, 'left', [('old', '{}')])
+    right = artifact(tmp_path, 'right', [('new', '{}')])
+    unused = tmp_path / 'unused'
+    monkeypatch.setenv('TAO_LOCAL_HOME', str(unused))
+    dest = tmp_path / 'comparison'
+    assert runner.main(['compare-artifacts', str(left), str(right),
+                        '--to', str(dest)]) == 0
+    assert (dest / 'manifest.json').is_file()
+    assert not unused.exists()

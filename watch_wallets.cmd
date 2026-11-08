@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal DisableDelayedExpansion
 cd /d "%~dp0"
 if /i "%~1"=="--setup" goto :setup
 call "%~dp0run_local.cmd" watch %*

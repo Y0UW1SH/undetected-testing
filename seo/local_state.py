@@ -10,7 +10,6 @@ import sqlite3
 import tempfile
 import time
 import uuid
-import zipfile
 
 
 class StateError(Exception):
@@ -83,7 +82,6 @@ def sqlite_copy(source, destination):
         if time.monotonic() > deadline:
             raise StateError('Database backup timed out; nothing replaced.')
 
-    created = False
     try:
         with closing(sqlite3.connect(source.resolve().as_uri() + '?mode=ro',
                                      uri=True, timeout=5)) as src:
@@ -91,17 +89,14 @@ def sqlite_copy(source, destination):
                 src.backup(dst, pages=1024, progress=progress, sleep=0.1)
                 if dst.execute('PRAGMA quick_check').fetchone() != ('ok',):
                     raise StateError('Database failed SQLite quick_check.')
-        # Exclusive creation also closes the race after the initial check.
-        with destination.open('xb') as out, temporary.open('rb') as src:
-            created = True
-            shutil.copyfileobj(src, out, 1024 * 1024)
-            out.flush()
-            os.fsync(out.fileno())
-    except BaseException:
-        # Remove only our incomplete new file, never a pre-existing one.
-        if created:
-            destination.unlink(missing_ok=True)
-        raise
+        # Windows rename refuses an existing target. POSIX rename would
+        # overwrite, so link the complete file into place without clobbering.
+        # Readers can never observe a partly copied destination, even if the
+        # process is terminated between publication and temporary cleanup.
+        if os.name == 'nt':
+            os.rename(temporary, destination)
+        else:
+            os.link(temporary, destination)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -119,7 +114,7 @@ def _backup_files(root):
     paths = list(root.glob('*.sqlite'))
     for folder in ('reports', 'config', 'try_tao_out', 'snapshots'):
         base = root / folder
-        if base.is_dir():
+        if base.is_dir() and not base.is_symlink():
             paths.extend(p for p in base.rglob('*') if p.suffix in
                          ('.sqlite', '.json', '.html', '.csv'))
     return sorted(p for p in paths if p.is_file() and not p.is_symlink())
@@ -189,8 +184,8 @@ def restore(source, destination):
 
 
 def import_artifact(archive, root):
-    """Keep original ZIP, then import only a verified wallet DB and report."""
-    from seo.tao_view import load_snapshot
+    """Keep originals and publish verified files into unused wallet state."""
+    from seo.local_reconcile import preserve_artifact
     archive, root = Path(archive), Path(root)
     with lease(root):
         database = root / 'wallets.sqlite'
@@ -199,27 +194,21 @@ def import_artifact(archive, root):
             raise FileExistsError(
                 'Wallet data exists. Import into a new root.')
         saved = root / 'imports' / (stamp() + '-' + uuid.uuid4().hex[:8])
-        saved.mkdir(parents=True)
-        original = saved / 'original.zip'
-        shutil.copyfile(archive, original)
-        atomic_write(saved / 'sha256.txt', digest(original) + '\n')
-        with zipfile.ZipFile(original) as zf:
-            selected = {}
-            for info in zf.infolist():
-                relative = _relative(info.filename.rstrip('/'))
-                if relative.name in ('wallets.sqlite', 'tao_collect.json'):
-                    if relative.name in selected or info.is_dir():
-                        raise StateError('Artifact contains ambiguous files.')
-                    selected[relative.name] = info
-            if set(selected) != {'wallets.sqlite', 'tao_collect.json'}:
-                raise StateError('Artifact must contain wallet DB and report.')
-            for name, info in selected.items():
-                with zf.open(info) as src, (saved / name).open('xb') as out:
-                    shutil.copyfileobj(src, out, 1024 * 1024)
-        load_snapshot(saved / 'tao_collect.json')
-        sqlite_copy(saved / 'wallets.sqlite', database)
+        preserve_artifact(archive, saved)
         raw = (saved / 'tao_collect.json').read_bytes()
-        atomic_write(root / 'snapshots' / ''.join(
-            c for c in stamp() if c.isdigit()) / 'tao_collect.json', raw)
-        atomic_write(report, raw)
+        snapshot = root / 'snapshots' / ''.join(
+            c for c in stamp() if c.isdigit()) / 'tao_collect.json'
+        created_database = False
+        try:
+            sqlite_copy(saved / 'wallets.sqlite', database)
+            created_database = True
+            atomic_write(snapshot, raw)
+            atomic_write(report, raw)
+        except BaseException:
+            # Roll back only newly created live files. The original ZIP and
+            # extracted, verified inputs remain available for another attempt.
+            snapshot.unlink(missing_ok=True)
+            if created_database:
+                database.unlink(missing_ok=True)
+            raise
         return saved

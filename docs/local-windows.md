@@ -50,8 +50,44 @@ run_local.cmd import-artifact "D:\Backups\wallet-collection.zip"
 Import checks the report and SQLite database and keeps the unmodified ZIP plus
 SHA-256 under `imports`. Existing wallet databases/reports are never overwritten;
 if there is a conflict, import into a **new** `--root` and compare the results.
+Ordinary import failures roll back newly published live files while keeping the
+original ZIP and extracted inputs. A force-killed import may leave an incomplete
+set of fully written files; preserve that directory and retry in a fresh root.
 ZIP and database processing is streamed, with no old 512 MiB backup limit.
 Allow space for the original ZIP, extracted original, active DB and backups.
+
+### Compare two snapshots before choosing a working state
+
+A later artifact is not necessarily a superset of an earlier one. Saved event
+IDs can disappear, and the payload for the same ID can be revised. History
+checkpoints, inventory, monitor cursors and derived performance depend on the
+matching rows from their own snapshot. Do not combine tables with `INSERT OR
+REPLACE`, select maximum cursors, or copy the newer database over the older one.
+
+```bat
+run_local.cmd compare-artifacts "D:\Backups\earlier.zip" "D:\Backups\later.zip" --to "D:\Backups\comparison-new"
+```
+
+This command creates a **new** preservation bundle, refusing an existing target.
+It keeps each original ZIP, its exact extracted database/report and SHA-256
+checksums in separate `source-1` and `source-2` folders. It verifies ZIP member
+reads, SQLite integrity, expected wallet-event columns and report structure
+before publishing the bundle.
+Nonempty WAL/journal sidecars are rejected rather than silently discarded.
+
+`comparison.json` reports all ordinary tables: row counts, missing tables,
+schema mismatches, duplicate-aware full-row differences and, where possible,
+missing/changed declared primary keys. An integer primary key can be a local
+sequence number, not a shared event identity. Different JSON formatting is
+conservatively treated as different data. Matching rows do not prove complete
+coverage or that the database and report are semantically consistent.
+
+**No databases are merged and no active source is selected.** Both original
+coverage reports remain unchanged. Inspect differences before explicitly
+importing a selected ZIP into a fresh working root. Keep the other original
+available for later evidence recovery. This tool does not claim a lossless merge
+or reconstruct missing history. `manifest.json` checksums every preserved file
+and the comparison. Keep this entire bundle private and outside the repository.
 
 To resume the historical account-directory checkpoint, clone its state branch
 **once**, then restore locally. These are migration commands, not recurring jobs:
@@ -114,7 +150,8 @@ matching Dwellir Finney HTTPS/WSS endpoints in `<root>\dwellir.txt`. Never put k
 in Git, command arguments, scheduler task definitions or chat. Foreground watch
 prompts with hidden input if no local credential is available. Scheduled
 `watch --once` cannot prompt: provision its local credential first, then test a
-one-shot poll yourself. Credentials are excluded from the managed backups.
+one-shot poll yourself. The managed backup excludes `dwellir.txt` and environment variables. Secrets
+manually placed in configuration or reports would still be copied; keep them out.
 Ctrl+C stops the foreground watcher. Stop a scheduled watcher through Task
 Scheduler; removing its schedule prevents later invocations but does not kill an
 already-running process. The old `stop_wallet_watcher.cmd` only handles legacy
@@ -164,7 +201,11 @@ subnet collection every four hours. Opt in to other jobs explicitly:
 .\tools\schedule_local.ps1 install -Root 'D:\Private Data\Tao' -Jobs collect,subnets,census,watch -DailyAt '09:30' -Replace
 ```
 
-Existing task definitions require `-Replace`. Names identify the checkout,
+Existing task definitions require `-Replace`. Trailing directory separators
+are normalized when identifying tasks. If an earlier version installed tasks
+using a root ending with a separator, remove those exact old names in Task
+Scheduler before reinstalling; the normalized name may differ.
+Names identify the checkout,
 private root and current user. Status/remove must use the same `-Root`.
 Recurring five-minute watch tasks run `--once`. Different collector jobs wait
 up to six hours for the shared writer lock; each task ignores overlapping
@@ -174,6 +215,11 @@ Tasks use the current user's **logged-on interactive session**, limited
 privileges, no stored Windows password and no administrator requirement. Keep
 the PC on, awake and signed in. A lock screen is not the same as a working,
 visible browser desktop, so test your machine's behavior before relying on it.
+The scheduler keeps Windows' default AC-power policy: jobs do not start on
+battery and may be stopped when switching to battery. Its 24-hour execution
+ceiling includes time spent waiting for another job. Forced termination is not
+a graceful cancellation. SQLite transactions and per-file atomic publication
+limit damage, but the latest report/status can lag saved database progress.
 After a missed trigger, Task Scheduler can start the job when available; there
 are no guarantees while asleep, logged off or powered down. Check status after
 reboot or resume. The script does not change execution policy. If Windows blocks

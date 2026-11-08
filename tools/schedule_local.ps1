@@ -23,13 +23,21 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$Repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
+function Normalize-Directory([string]$Value) {
+    $full = [IO.Path]::GetFullPath($Value)
+    $volume = [IO.Path]::GetPathRoot($full)
+    # Equivalent directory spellings must select the same task identity. Keep
+    # the separator on drive/UNC roots so they remain absolute paths.
+    if ($full.Length -gt $volume.Length) { return $full.TrimEnd('\') }
+    return $full
+}
+$Repo = Normalize-Directory (Join-Path $PSScriptRoot '..')
 if (-not $Root) { $Root = $env:TAO_LOCAL_HOME }
 if (-not $Root) {
     if (-not $env:LOCALAPPDATA) { throw 'LOCALAPPDATA is unavailable; specify -Root.' }
     $Root = Join-Path $env:LOCALAPPDATA 'StealthWalletMonitor\LocalRunner'
 }
-$Root = [IO.Path]::GetFullPath($Root)
+$Root = Normalize-Directory $Root
 $Python = Join-Path $Repo '.venv-local\Scripts\python.exe'
 $User = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 # Stable instance identity isolates different checkouts, roots, and users.
