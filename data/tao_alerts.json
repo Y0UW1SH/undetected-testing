@@ -1,25 +1,25 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-08T20:44:46+00:00",
-  "previous_run": "2026-11-08T15:33:32+00:00",
+  "checked_at": "2026-11-09T07:07:10+00:00",
+  "previous_run": "2026-11-08T20:44:46+00:00",
   "alerts": [
     {
-      "netuid": 78,
-      "name": "Umi",
-      "kind": "price_down",
+      "netuid": 61,
+      "name": "RedTeam",
+      "kind": "price_up",
       "field": "price",
-      "old": 0.000975,
-      "new": 0.000801,
-      "change_pct": -17.85
+      "old": 0.005294,
+      "new": 0.00656,
+      "change_pct": 23.91
     },
     {
-      "netuid": 78,
-      "name": "Umi",
-      "kind": "mcap_down",
+      "netuid": 61,
+      "name": "RedTeam",
+      "kind": "mcap_up",
       "field": "market cap",
-      "old": 1600.0,
-      "new": 1310.0,
-      "change_pct": -18.12
+      "old": 30140.0,
+      "new": 37370.0,
+      "change_pct": 23.99
     }
   ]
 }
