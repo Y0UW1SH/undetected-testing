@@ -1,7 +1,10 @@
 # undetected-testing
 
 **Windows-first local runner:** all GitHub Actions workflows have been removed.
+The source project is on `feat/windows-local-runner` ([draft PR #2](https://github.com/Y0UW1SH/undetected-testing/pull/2)), not an installed EXE.
 Start with [Windows setup, migration and scheduling](docs/local-windows.md).
+For a browser-free public-data smoke test, use `run_local.cmd api-collect`.
+See [desktop validation and remaining limits](docs/local-validation.md).
 No automatic collection or data uploads run from this repository.
 
 Testing [SeleniumBase](https://github.com/seleniumbase/SeleniumBase) stealth for bypassing bot-detection.

@@ -1,8 +1,106 @@
-"""Static contracts; Task Scheduler still needs a Windows smoke test."""
+"""Launcher contracts and offline checks; no Task Scheduler registration."""
+import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def powershell():
+    executable = (os.environ.get('POWERSHELL_EXE')
+                  or shutil.which('pwsh') or shutil.which('powershell'))
+    if not executable:
+        pytest.skip('PowerShell is unavailable; syntax was not verified')
+    return executable
+
+
+def run_powershell(executable, *args, env=None):
+    return subprocess.run([executable, '-NoLogo', '-NoProfile', *args],
+                          capture_output=True, text=True, timeout=60, env=env)
+
+
+def test_smoke_syntax_mode_parses_without_running_scheduler(powershell):
+    result = run_powershell(powershell, '-File',
+                            str(ROOT / 'tools/test_windows_local.ps1'),
+                            '-SyntaxOnly')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'PowerShell syntax checks passed' in result.stdout
+
+
+def test_smoke_syntax_mode_rejects_broken_scheduler(powershell, tmp_path):
+    tools = tmp_path / 'tools'
+    tools.mkdir()
+    script = tools / 'test_windows_local.ps1'
+    shutil.copyfile(ROOT / 'tools/test_windows_local.ps1', script)
+    (tools / 'schedule_local.ps1').write_text('param([string]$value\n')
+    result = run_powershell(powershell, '-File', str(script), '-SyntaxOnly')
+    assert result.returncode != 0
+    assert 'schedule_local.ps1' in result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Non-Windows guard')
+def test_smoke_refuses_native_checks_off_windows(powershell, tmp_path):
+    root = tmp_path / 'must remain absent'
+    env = dict(os.environ, TAO_LOCAL_HOME=str(root))
+    result = run_powershell(powershell, '-File',
+                            str(ROOT / 'tools/test_windows_local.ps1'),
+                            env=env)
+    assert result.returncode != 0
+    assert 'requires Windows' in result.stdout + result.stderr
+    assert not root.exists()
+
+
+def test_scheduler_quotes_windows_paths_without_evaluating_them(powershell):
+    # Extract only the real quoting function. Never execute the scheduler.
+    path = str(ROOT / 'tools/schedule_local.ps1').replace("'", "''")
+    command = r'''
+$tokens = $null; $errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+    '%s', [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw 'Scheduler syntax is invalid.' }
+$fn = $ast.Find({ param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] `
+        -and $node.Name -eq 'Quote-Argument'
+}, $true)
+. ([scriptblock]::Create($fn.Extent.Text))
+@((Quote-Argument 'D:\Private data ! (test)'),
+  (Quote-Argument 'C:\'),
+  (Quote-Argument '\\server\share\')) | ConvertTo-Json -Compress
+''' % path
+    result = run_powershell(powershell, '-Command', command)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == [
+        '"D:\\Private data ! (test)"', '"C:\\\\"',
+        '"\\\\server\\share\\\\"']
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Requires native cmd.exe')
+def test_native_launcher_preserves_root_and_nonzero_exit(tmp_path):
+    python = ROOT / '.venv-local/Scripts/python.exe'
+    if not python.is_file():
+        pytest.skip('Run setup_local.cmd before testing the native launcher')
+    root = tmp_path / 'Private data ! (test)'
+    launcher = str(ROOT / 'run_local.cmd')
+
+    def launch(*args):
+        return subprocess.run([launcher, '--root', str(root), *args],
+                              cwd=tmp_path, capture_output=True, text=True,
+                              timeout=60)
+
+    result = launch('init')
+    assert result.returncode == 0, result.stdout + result.stderr
+    config = root / 'config/local.json'
+    assert json.loads(config.read_text())['collect']
+    before = config.read_bytes()
+    assert launch('status').returncode == 0
+    assert launch('not-a-real-command').returncode == 2
+    assert config.read_bytes() == before
 
 
 def read(name):

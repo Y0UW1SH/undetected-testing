@@ -11,12 +11,28 @@ These changes take effect for hosted schedules when this branch is merged.
 ## Setup
 
 Use Windows 10/11 x64, official **Python 3.13** with the Python launcher, and
-Google Chrome. Keep this source checkout in a stable folder. In a console:
+Google Chrome. The project is on branch **`feat/windows-local-runner`** in
+[PR #2](https://github.com/Y0UW1SH/undetected-testing/pull/2), not on `master`
+until that PR is merged. Get the correct source once:
+
+```bat
+git clone --branch feat/windows-local-runner --single-branch https://github.com/Y0UW1SH/undetected-testing.git
+cd undetected-testing
+```
+
+Alternatively use GitHub's Download ZIP while that branch is selected. Extract
+it completely first. Keep this source checkout in a stable folder. In a console:
 
 ```bat
 setup_local.cmd
 run_local.cmd check
 ```
+
+Then run `tools\test_windows_local.ps1` from PowerShell for the offline Windows
+smoke check. It verifies Python/dependencies, runs tests, and exercises the CMD
+launcher plus backup/restore in disposable state. It never registers scheduled
+tasks, starts a browser, or contacts a data provider. `-SyntaxOnly` checks the
+PowerShell parser on other operating systems without claiming Windows execution.
 
 Setup creates `.venv-local`, installs the project and collector/RPC dependencies,
 and initializes private configuration. It does not start collection, monitoring
@@ -111,6 +127,55 @@ files. Keep source files unchanged. Copy private watch preferences only after
 stopping the editor and watcher: `try_tao_out/local_watchlist.sqlite` belongs at
 that same relative path in the new root. Legacy movement data requires the same
 care; do not merge two live SQLite files by copying one over the other.
+
+## Browser-free TAO.com observations
+
+This explicit command works with public HTTP data and does not need Chrome or an
+API key. It is separate from the existing Taostats collector and wallet viewer:
+
+```bat
+run_local.cmd api-collect --netuid 1 --pages 2 --page-size 3
+```
+
+To inspect a wallet, append `--address YOUR_SS58_ADDRESS`. This explicitly sends
+that address to TAO.com. The command never reads your private watchlist or
+credentials automatically. It fetches latest TAO/USD price, the selected subnet,
+subnet trade pages, and optionally that account's latest balance and transaction
+pages. No balance/performance ranking is inferred.
+
+Defaults are subnet 1, one page, ten rows. Maximums are five pages and 100 rows
+per page for each feed. There are at most 13 requests with a wallet, no retries,
+a 30-second socket inactivity timeout, and a 5 MiB response cap. The timeout is
+not a total-run deadline. Requests use fixed HTTPS paths; redirects are refused,
+and provider pagination links are not followed. Subnet cursors and account
+offsets are encoded by the client. This is a fresh bounded observation, not a
+resumable historical backfill. Run only as needed; no API schedule is installed.
+
+The command prints the path of an immutable HTML summary in
+`<root>\snapshots\api\<run>`. Open that file in your browser. The same directory
+contains raw JSON response bytes, request metadata, a JSON report and SHA-256
+manifest. `<root>\reports\tao_api.json` is the single atomically replaced current
+report and identifies the matching evidence directory. Raw units and provider
+timestamps are retained. Backups and restores include this evidence. Previous
+runs remain available. Source/schema failures keep the prior current report.
+
+**This does not replace or modify `wallets.sqlite` or `tao_collect.json`.**
+History and trading P&L are always labeled unverified. Page counts can include
+duplicates and feed exhaustion does not establish complete chain history.
+Validation checks response shape, not every event's semantics. In live testing,
+TAO.com's account transactions and transaction-details omitted a leg of a
+multi-leg extrinsic that the canonical subnet trade feed and archive chain data
+showed. Account offsets are capped at 10,000; exited-position holding history can
+be empty. These endpoints must not be treated as a lossless accounting ledger.
+
+The hosted OpenTaoAPI was also tested. Its market endpoints worked, but trader
+rankings and stake-event routes returned 404. Its history can hit row caps or
+lack recent wallet observations. It is not configured as an automatic fallback;
+missing capabilities must not become zero activity or zero P&L.
+
+See [the implementation plan](superpowers/plans/2026-11-09-local-api.md) and
+[desktop validation results](local-validation.md) for the executed checks and
+remaining deployment work.
 
 ## Collect, inspect and monitor
 

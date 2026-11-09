@@ -255,6 +255,12 @@ def main(argv=None):
     for name in ('init', 'backup', 'status', 'view',
                  'check', 'edit', 'directory'):
         sub.add_parser(name)
+    from seo import local_api
+    api = sub.add_parser('api-collect', help='bounded TAO.com observations')
+    api.add_argument('--netuid', type=local_api.bounded(0, 65535), default=1)
+    api.add_argument('--address', type=local_api.address_arg)
+    api.add_argument('--pages', type=local_api.bounded(1, 5), default=1)
+    api.add_argument('--page-size', type=local_api.bounded(1, 100), default=10)
     imp = sub.add_parser('import-artifact')
     imp.add_argument('zip', type=Path)
     compare = sub.add_parser('compare-artifacts')
@@ -285,6 +291,11 @@ def main(argv=None):
                 return invoke(module, ([command] if command else []) + extra)
             except SystemExit as exc:
                 return int(exc.code or 0)
+        if args.command == 'api-collect':
+            return local_api.run(root, netuid=args.netuid,
+                                 address=args.address,
+                                 pages=args.pages, page_size=args.page_size,
+                                 wait=args.wait)
         if args.command in JOBS:
             return run_job(root, args.command, extra, wait=args.wait)
         if args.command == 'compare-artifacts':
