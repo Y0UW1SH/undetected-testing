@@ -71,3 +71,18 @@ id,query,location,device,position,name,rating,reviews,category,address,phone,sta
 70,plumber near me,"Austin, TX",mobile,3,Mendez Family Plumbing & Electrical,4.9,130,Plumber,,(512) 813-0488,"7+ years in business · Austin, TX · Open · Closes 7 PM",0,2026-11-09T20:06:19+00:00
 71,plumber near me,"Austin, TX",mobile,4,Fox Service Company My Ad Center,4.8,5600,,,(512) 882-1004,(5.6K) · Plumber · 50+ years in business · 1506 Ferguson Lane · Open 24 hours,1,2026-11-09T20:06:19+00:00
 72,plumber near me,"Austin, TX",mobile,5,My Ad Center,4.8,5601,,,,,0,2026-11-09T20:06:19+00:00
+73,emergency plumber,"Austin, TX",desktop,1,My Ad Center,4.8,5601,,,,,0,2026-11-10T17:16:23+00:00
+74,emergency plumber,"Austin, TX",desktop,2,Fox Service Company My Ad Center,4.8,5600,,,(512) 882-1004,(5.6K) · Plumber · 50+ years in business · 1506 Ferguson Lane · Open 24 hours,1,2026-11-10T17:16:23+00:00
+75,emergency plumber,"Austin, TX",desktop,3,We Plumb LLC,4.9,190,Plumber,,(737) 297-5863,3+ years in business · Open 24 hours,0,2026-11-10T17:16:23+00:00
+76,emergency plumber,"Austin, TX",desktop,4,Magic Plumbing ATX,4.9,194,Plumber,,(512) 228-9421,"5+ years in business · Austin, TX · Open 24 hours",0,2026-11-10T17:16:23+00:00
+77,emergency plumber,"Austin, TX",desktop,5,Austin Plumbery,4.8,228,Plumber,,(512) 766-1519,10+ years in business · Open · Closes 6 PM,0,2026-11-10T17:16:23+00:00
+78,emergency plumber,"Austin, TX",desktop,6,My Ad Center,4.8,5601,,,,,0,2026-11-10T17:16:23+00:00
+79,water heater repair austin,"Austin, TX",desktop,1,"Radiant Plumbing, Air Conditioning, & Electrical",4.8,18000,,,(512) 690-4935,"(18K) · Plumber · 25+ years in business · Austin, TX · Open 24 hours",0,2026-11-10T17:16:32+00:00
+80,water heater repair austin,"Austin, TX",desktop,2,"Stan's Heating, Air, Plumbing & Electrical",4.7,6900,,,(512) 200-7614,"(6.9K) · Plumber · 70+ years in business · Austin, TX · Open 24 hours",0,2026-11-10T17:16:32+00:00
+81,water heater repair austin,"Austin, TX",desktop,3,SALT Plumbing Air & Electric,4.9,1700,,,(737) 355-5063,"(1.7K) · Air conditioning repair service · 40+ years in business · Austin, TX · Open · Closes 8 PM",0,2026-11-10T17:16:32+00:00
+82,water heater repair austin,"Austin, TX",desktop,4,Fox Service Company My Ad Center,4.8,5600,,,(512) 882-1004,(5.6K) · Plumber · 50+ years in business · 1506 Ferguson Lane · Open 24 hours,1,2026-11-10T17:16:32+00:00
+83,plumber near me,"Austin, TX",mobile,1,My Ad Center,4.8,5601,,,,,0,2026-11-10T17:20:48+00:00
+84,plumber near me,"Austin, TX",mobile,2,Fox Service Company My Ad Center,4.8,5600,,,(512) 882-1004,(5.6K) · Plumber · 50+ years in business · 1506 Ferguson Lane · Open 24 hours,1,2026-11-10T17:20:48+00:00
+85,plumber near me,"Austin, TX",mobile,3,Austin Plumbery,4.8,228,Plumber,,(512) 766-1519,10+ years in business · Open · Closes 6 PM,0,2026-11-10T17:20:48+00:00
+86,plumber near me,"Austin, TX",mobile,4,We Plumb LLC,4.9,190,Plumber,,(737) 297-5863,3+ years in business · Open 24 hours,0,2026-11-10T17:20:48+00:00
+87,plumber near me,"Austin, TX",mobile,5,Chase LLC,4.8,156,Plumber,,(512) 890-2933,"5+ years in business · Austin, TX · Open 24 hours",0,2026-11-10T17:20:48+00:00
