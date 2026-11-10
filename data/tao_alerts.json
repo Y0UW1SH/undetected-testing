@@ -1,52 +1,70 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-09T19:05:12+00:00",
-  "previous_run": "2026-11-09T07:07:10+00:00",
+  "checked_at": "2026-11-10T02:54:02+00:00",
+  "previous_run": "2026-11-09T19:05:12+00:00",
   "alerts": [
     {
-      "netuid": 36,
-      "name": "Weir",
-      "kind": "price_up",
-      "field": "price",
-      "old": 0.010428,
-      "new": 0.012646,
-      "change_pct": 21.27
-    },
-    {
-      "netuid": 36,
-      "name": "Weir",
-      "kind": "mcap_up",
-      "field": "market cap",
-      "old": 940.06,
-      "new": 1190.0,
-      "change_pct": 26.59
-    },
-    {
-      "netuid": 58,
-      "name": "Attune",
-      "kind": "mcap_up",
-      "field": "market cap",
-      "old": 10060.0,
-      "new": 11090.0,
-      "change_pct": 10.24
-    },
-    {
-      "netuid": 61,
-      "name": "RedTeam",
+      "netuid": 70,
+      "name": "Fugal",
       "kind": "price_down",
       "field": "price",
-      "old": 0.00656,
-      "new": 0.005884,
-      "change_pct": -10.3
+      "old": 0.009997,
+      "new": 0.008489,
+      "change_pct": -15.08
     },
     {
-      "netuid": 61,
-      "name": "RedTeam",
+      "netuid": 70,
+      "name": "Fugal",
       "kind": "mcap_down",
       "field": "market cap",
-      "old": 37370.0,
-      "new": 33540.0,
-      "change_pct": -10.25
+      "old": 954.72,
+      "new": 834.47,
+      "change_pct": -12.6
+    },
+    {
+      "netuid": 78,
+      "name": "Umi",
+      "kind": "gone",
+      "field": null,
+      "old": 0.000842,
+      "new": null,
+      "change_pct": null
+    },
+    {
+      "netuid": 86,
+      "name": "OnSale",
+      "kind": "price_down",
+      "field": "price",
+      "old": 0.001394,
+      "new": 0.000971,
+      "change_pct": -30.34
+    },
+    {
+      "netuid": 86,
+      "name": "OnSale",
+      "kind": "mcap_down",
+      "field": "market cap",
+      "old": 411.37,
+      "new": 288.98,
+      "change_pct": -29.75
+    },
+    {
+      "netuid": 102,
+      "name": "ConnitoAI",
+      "kind": "price_down",
+      "field": "price",
+      "old": 0.004537,
+      "new": 0.004013,
+      "change_pct": -11.55
+    },
+    {
+      "netuid": 102,
+      "name": "ConnitoAI",
+      "kind": "mcap_down",
+      "field": "market cap",
+      "old": 7840.0,
+      "new": 6940.0,
+      "change_pct": -11.48
     }
   ]
 }
