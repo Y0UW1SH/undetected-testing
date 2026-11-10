@@ -1,6 +1,79 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-10T12:56:10+00:00",
-  "previous_run": "2026-11-10T02:54:02+00:00",
-  "alerts": []
+  "checked_at": "2026-11-10T21:56:42+00:00",
+  "previous_run": "2026-11-10T12:56:10+00:00",
+  "alerts": [
+    {
+      "netuid": 36,
+      "name": "Weir",
+      "kind": "price_up",
+      "field": "price",
+      "old": 0.012036,
+      "new": 0.017941,
+      "change_pct": 49.06
+    },
+    {
+      "netuid": 36,
+      "name": "Weir",
+      "kind": "mcap_up",
+      "field": "market cap",
+      "old": 1210.0,
+      "new": 1860.0,
+      "change_pct": 53.72
+    },
+    {
+      "netuid": 100,
+      "name": "Cortex",
+      "kind": "price_up",
+      "field": "price",
+      "old": 0.003326,
+      "new": 0.003959,
+      "change_pct": 19.03
+    },
+    {
+      "netuid": 100,
+      "name": "Cortex",
+      "kind": "mcap_up",
+      "field": "market cap",
+      "old": 6970.0,
+      "new": 8300.0,
+      "change_pct": 19.08
+    },
+    {
+      "netuid": 109,
+      "name": "Finsight",
+      "kind": "price_down",
+      "field": "price",
+      "old": 0.001833,
+      "new": 0.001325,
+      "change_pct": -27.71
+    },
+    {
+      "netuid": 109,
+      "name": "Finsight",
+      "kind": "mcap_down",
+      "field": "market cap",
+      "old": 2990.0,
+      "new": 2160.0,
+      "change_pct": -27.76
+    },
+    {
+      "netuid": 118,
+      "name": "Ditto",
+      "kind": "price_down",
+      "field": "price",
+      "old": 0.003147,
+      "new": 0.002791,
+      "change_pct": -11.31
+    },
+    {
+      "netuid": 118,
+      "name": "Ditto",
+      "kind": "mcap_down",
+      "field": "market cap",
+      "old": 9650.0,
+      "new": 8570.0,
+      "change_pct": -11.19
+    }
+  ]
 }
