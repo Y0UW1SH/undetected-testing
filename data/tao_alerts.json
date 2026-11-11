@@ -1,115 +1,88 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-11T16:33:32+00:00",
-  "previous_run": "2026-11-11T07:00:58+00:00",
+  "checked_at": "2026-11-11T22:59:49+00:00",
+  "previous_run": "2026-11-11T16:33:32+00:00",
   "alerts": [
     {
-      "netuid": 36,
-      "name": "Weir",
-      "kind": "price_down",
-      "field": "price",
-      "old": 0.015138,
-      "new": 0.013481,
-      "change_pct": -10.95
-    },
-    {
-      "netuid": 74,
-      "name": "Gittensor",
-      "kind": "price_down",
-      "field": "price",
-      "old": 0.004397,
-      "new": 0.003679,
-      "change_pct": -16.33
-    },
-    {
-      "netuid": 74,
-      "name": "Gittensor",
-      "kind": "mcap_down",
-      "field": "market cap",
-      "old": 21710.0,
-      "new": 18170.0,
-      "change_pct": -16.31
-    },
-    {
-      "netuid": 99,
+      "netuid": 35,
       "name": "Unknown",
-      "kind": "new",
+      "kind": "gone",
       "field": null,
-      "old": null,
-      "new": 0.027025,
+      "old": 0.000462,
+      "new": null,
       "change_pct": null
     },
     {
-      "netuid": 102,
-      "name": "ConnitoAI",
-      "kind": "price_down",
-      "field": "price",
-      "old": 0.003995,
-      "new": 0.003548,
-      "change_pct": -11.19
-    },
-    {
-      "netuid": 102,
-      "name": "ConnitoAI",
-      "kind": "mcap_down",
-      "field": "market cap",
-      "old": 6940.0,
-      "new": 6170.0,
-      "change_pct": -11.1
-    },
-    {
-      "netuid": 109,
-      "name": "Finsight",
+      "netuid": 76,
+      "name": "Ormas",
       "kind": "price_up",
       "field": "price",
-      "old": 0.001281,
-      "new": 0.001416,
-      "change_pct": 10.54
+      "old": 0.002776,
+      "new": 0.003334,
+      "change_pct": 20.1
     },
     {
-      "netuid": 109,
-      "name": "Finsight",
+      "netuid": 76,
+      "name": "Ormas",
       "kind": "mcap_up",
       "field": "market cap",
-      "old": 2090.0,
-      "new": 2320.0,
-      "change_pct": 11.0
+      "old": 945.52,
+      "new": 1140.0,
+      "change_pct": 20.57
     },
     {
-      "netuid": 113,
-      "name": "Unknown",
+      "netuid": 87,
+      "name": "Provenonce",
       "kind": "price_down",
       "field": "price",
-      "old": 0.001912,
-      "new": 0.001656,
-      "change_pct": -13.39
+      "old": 0.002486,
+      "new": 0.002167,
+      "change_pct": -12.83
     },
     {
-      "netuid": 113,
-      "name": "Unknown",
+      "netuid": 87,
+      "name": "Provenonce",
       "kind": "mcap_down",
       "field": "market cap",
-      "old": 3490.0,
-      "new": 3030.0,
-      "change_pct": -13.18
+      "old": 4180.0,
+      "new": 3650.0,
+      "change_pct": -12.68
+    },
+    {
+      "netuid": 92,
+      "name": "REAX",
+      "kind": "price_up",
+      "field": "price",
+      "old": 0.023292,
+      "new": 0.028776,
+      "change_pct": 23.54
+    },
+    {
+      "netuid": 92,
+      "name": "REAX",
+      "kind": "mcap_up",
+      "field": "market cap",
+      "old": 10600.0,
+      "new": 13150.0,
+      "change_pct": 24.06
     },
     {
       "netuid": 117,
       "name": "everyframe.studio",
-      "kind": "price_down",
+      "kind": "price_up",
       "field": "price",
-      "old": 0.006387,
-      "new": 0.004656,
-      "change_pct": -27.1
+      "old": 0.004656,
+      "new": 0.005495,
+      "change_pct": 18.02
     },
     {
       "netuid": 117,
       "name": "everyframe.studio",
-      "kind": "mcap_down",
+      "kind": "mcap_up",
       "field": "market cap",
-      "old": 18730.0,
-      "new": 13670.0,
-      "change_pct": -27.02
+      "old": 13670.0,
+      "new": 16150.0,
+      "change_pct": 18.14
     }
   ]
 }
