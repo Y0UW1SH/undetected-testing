@@ -1,43 +1,52 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-12T07:39:32+00:00",
-  "previous_run": "2026-11-11T22:59:49+00:00",
+  "checked_at": "2026-11-12T17:02:49+00:00",
+  "previous_run": "2026-11-12T07:39:32+00:00",
   "alerts": [
     {
-      "netuid": 47,
-      "name": "GPUForge",
-      "kind": "price_down",
+      "netuid": 35,
+      "name": "Unknown",
+      "kind": "new",
+      "field": null,
+      "old": null,
+      "new": 0.01715,
+      "change_pct": null
+    },
+    {
+      "netuid": 42,
+      "name": "CADmind",
+      "kind": "price_up",
       "field": "price",
-      "old": 0.001523,
-      "new": 0.001187,
-      "change_pct": -22.06
+      "old": 0.002163,
+      "new": 0.002797,
+      "change_pct": 29.31
     },
     {
-      "netuid": 47,
-      "name": "GPUForge",
-      "kind": "mcap_down",
+      "netuid": 42,
+      "name": "CADmind",
+      "kind": "mcap_up",
       "field": "market cap",
-      "old": 2620.0,
-      "new": 2040.0,
-      "change_pct": -22.14
+      "old": 11650.0,
+      "new": 15060.0,
+      "change_pct": 29.27
     },
     {
-      "netuid": 76,
-      "name": "Ormas",
-      "kind": "price_down",
+      "netuid": 127,
+      "name": "Zils",
+      "kind": "price_up",
       "field": "price",
-      "old": 0.003334,
-      "new": 0.002966,
-      "change_pct": -11.04
+      "old": 0.003138,
+      "new": 0.003507,
+      "change_pct": 11.76
     },
     {
-      "netuid": 76,
-      "name": "Ormas",
-      "kind": "mcap_down",
+      "netuid": 127,
+      "name": "Zils",
+      "kind": "mcap_up",
       "field": "market cap",
-      "old": 1140.0,
-      "new": 1020.0,
-      "change_pct": -10.53
+      "old": 10080.0,
+      "new": 11270.0,
+      "change_pct": 11.81
     }
   ]
 }
