@@ -1,88 +1,43 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-11T22:59:49+00:00",
-  "previous_run": "2026-11-11T16:33:32+00:00",
+  "checked_at": "2026-11-12T07:39:32+00:00",
+  "previous_run": "2026-11-11T22:59:49+00:00",
   "alerts": [
     {
-      "netuid": 35,
-      "name": "Unknown",
-      "kind": "gone",
-      "field": null,
-      "old": 0.000462,
-      "new": null,
-      "change_pct": null
-    },
-    {
-      "netuid": 76,
-      "name": "Ormas",
-      "kind": "price_up",
-      "field": "price",
-      "old": 0.002776,
-      "new": 0.003334,
-      "change_pct": 20.1
-    },
-    {
-      "netuid": 76,
-      "name": "Ormas",
-      "kind": "mcap_up",
-      "field": "market cap",
-      "old": 945.52,
-      "new": 1140.0,
-      "change_pct": 20.57
-    },
-    {
-      "netuid": 87,
-      "name": "Provenonce",
+      "netuid": 47,
+      "name": "GPUForge",
       "kind": "price_down",
       "field": "price",
-      "old": 0.002486,
-      "new": 0.002167,
-      "change_pct": -12.83
+      "old": 0.001523,
+      "new": 0.001187,
+      "change_pct": -22.06
     },
     {
-      "netuid": 87,
-      "name": "Provenonce",
+      "netuid": 47,
+      "name": "GPUForge",
       "kind": "mcap_down",
       "field": "market cap",
-      "old": 4180.0,
-      "new": 3650.0,
-      "change_pct": -12.68
+      "old": 2620.0,
+      "new": 2040.0,
+      "change_pct": -22.14
     },
     {
-      "netuid": 92,
-      "name": "REAX",
-      "kind": "price_up",
+      "netuid": 76,
+      "name": "Ormas",
+      "kind": "price_down",
       "field": "price",
-      "old": 0.023292,
-      "new": 0.028776,
-      "change_pct": 23.54
+      "old": 0.003334,
+      "new": 0.002966,
+      "change_pct": -11.04
     },
     {
-      "netuid": 92,
-      "name": "REAX",
-      "kind": "mcap_up",
+      "netuid": 76,
+      "name": "Ormas",
+      "kind": "mcap_down",
       "field": "market cap",
-      "old": 10600.0,
-      "new": 13150.0,
-      "change_pct": 24.06
-    },
-    {
-      "netuid": 117,
-      "name": "everyframe.studio",
-      "kind": "price_up",
-      "field": "price",
-      "old": 0.004656,
-      "new": 0.005495,
-      "change_pct": 18.02
-    },
-    {
-      "netuid": 117,
-      "name": "everyframe.studio",
-      "kind": "mcap_up",
-      "field": "market cap",
-      "old": 13670.0,
-      "new": 16150.0,
-      "change_pct": 18.14
+      "old": 1140.0,
+      "new": 1020.0,
+      "change_pct": -10.53
     }
   ]
 }
