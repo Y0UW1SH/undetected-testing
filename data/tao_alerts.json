@@ -1,43 +1,88 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-13T01:27:35+00:00",
-  "previous_run": "2026-11-12T17:02:49+00:00",
+  "checked_at": "2026-11-13T12:34:02+00:00",
+  "previous_run": "2026-11-13T01:27:35+00:00",
   "alerts": [
     {
-      "netuid": 41,
-      "name": "Almanac",
+      "netuid": 35,
+      "name": "Unknown",
       "kind": "price_down",
       "field": "price",
-      "old": 0.010238,
-      "new": 0.00883,
-      "change_pct": -13.75
+      "old": 0.015493,
+      "new": 0.013254,
+      "change_pct": -14.45
     },
     {
-      "netuid": 41,
-      "name": "Almanac",
-      "kind": "mcap_down",
-      "field": "market cap",
-      "old": 52260.0,
-      "new": 45090.0,
-      "change_pct": -13.72
-    },
-    {
-      "netuid": 42,
-      "name": "CADmind",
+      "netuid": 47,
+      "name": "GF",
       "kind": "price_down",
       "field": "price",
-      "old": 0.002797,
-      "new": 0.002448,
-      "change_pct": -12.48
+      "old": 0.001189,
+      "new": 0.000763,
+      "change_pct": -35.83
     },
     {
-      "netuid": 42,
-      "name": "CADmind",
+      "netuid": 47,
+      "name": "GF",
       "kind": "mcap_down",
       "field": "market cap",
-      "old": 15060.0,
-      "new": 13180.0,
-      "change_pct": -12.48
+      "old": 2050.0,
+      "new": 1320.0,
+      "change_pct": -35.61
+    },
+    {
+      "netuid": 84,
+      "name": "Unknown",
+      "kind": "price_down",
+      "field": "price",
+      "old": 0.002042,
+      "new": 0.001778,
+      "change_pct": -12.93
+    },
+    {
+      "netuid": 84,
+      "name": "Unknown",
+      "kind": "mcap_down",
+      "field": "market cap",
+      "old": 3250.0,
+      "new": 2830.0,
+      "change_pct": -12.92
+    },
+    {
+      "netuid": 109,
+      "name": "Finsight",
+      "kind": "price_down",
+      "field": "price",
+      "old": 0.001587,
+      "new": 0.001416,
+      "change_pct": -10.78
+    },
+    {
+      "netuid": 109,
+      "name": "Finsight",
+      "kind": "mcap_down",
+      "field": "market cap",
+      "old": 2610.0,
+      "new": 2330.0,
+      "change_pct": -10.73
+    },
+    {
+      "netuid": 116,
+      "name": "Carbon",
+      "kind": "price_up",
+      "field": "price",
+      "old": 0.028864,
+      "new": 0.031851,
+      "change_pct": 10.35
+    },
+    {
+      "netuid": 116,
+      "name": "Carbon",
+      "kind": "mcap_up",
+      "field": "market cap",
+      "old": 9080.0,
+      "new": 10080.0,
+      "change_pct": 11.01
     }
   ]
 }
