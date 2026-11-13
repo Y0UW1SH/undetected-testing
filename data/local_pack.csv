@@ -109,3 +109,6 @@ id,query,location,device,position,name,rating,reviews,category,address,phone,sta
 108,plumber near me,"Austin, TX",mobile,2,We Plumb LLC,4.9,190,Plumber,,(737) 297-5863,3+ years in business · Open 24 hours,0,2026-11-12T17:49:10+00:00
 109,plumber near me,"Austin, TX",mobile,3,Mendez Family Plumbing & Electrical,4.9,130,Plumber,,(512) 813-0488,"7+ years in business · Austin, TX · Open · Closes 6 PM",0,2026-11-12T17:49:10+00:00
 110,plumber near me,"Austin, TX",mobile,4,Fast Plumbing LLC My Ad Center,4.2,132,Plumber,,(512) 548-8188,20+ years in business · 6200 North Farm to Market Road 973 · Open · Closes 8 PM,1,2026-11-12T17:49:10+00:00
+111,emergency plumber,"Austin, TX",desktop,1,We Plumb LLC,4.9,191,Plumber,,(737) 297-5863,3+ years in business · Open 24 hours,0,2026-11-13T17:23:04+00:00
+112,emergency plumber,"Austin, TX",desktop,2,Magic Plumbing ATX,4.9,197,Plumber,,(512) 228-9421,"5+ years in business · Austin, TX · Open 24 hours",0,2026-11-13T17:23:04+00:00
+113,emergency plumber,"Austin, TX",desktop,3,Austin Plumbery,4.8,228,Plumber,,(512) 766-1519,10+ years in business · Open · Closes 6 PM,0,2026-11-13T17:23:04+00:00
