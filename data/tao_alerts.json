@@ -1,52 +1,43 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-12T17:02:49+00:00",
-  "previous_run": "2026-11-12T07:39:32+00:00",
+  "checked_at": "2026-11-13T01:27:35+00:00",
+  "previous_run": "2026-11-12T17:02:49+00:00",
   "alerts": [
     {
-      "netuid": 35,
-      "name": "Unknown",
-      "kind": "new",
-      "field": null,
-      "old": null,
-      "new": 0.01715,
-      "change_pct": null
+      "netuid": 41,
+      "name": "Almanac",
+      "kind": "price_down",
+      "field": "price",
+      "old": 0.010238,
+      "new": 0.00883,
+      "change_pct": -13.75
+    },
+    {
+      "netuid": 41,
+      "name": "Almanac",
+      "kind": "mcap_down",
+      "field": "market cap",
+      "old": 52260.0,
+      "new": 45090.0,
+      "change_pct": -13.72
     },
     {
       "netuid": 42,
       "name": "CADmind",
-      "kind": "price_up",
+      "kind": "price_down",
       "field": "price",
-      "old": 0.002163,
-      "new": 0.002797,
-      "change_pct": 29.31
+      "old": 0.002797,
+      "new": 0.002448,
+      "change_pct": -12.48
     },
     {
       "netuid": 42,
       "name": "CADmind",
-      "kind": "mcap_up",
+      "kind": "mcap_down",
       "field": "market cap",
-      "old": 11650.0,
-      "new": 15060.0,
-      "change_pct": 29.27
-    },
-    {
-      "netuid": 127,
-      "name": "Zils",
-      "kind": "price_up",
-      "field": "price",
-      "old": 0.003138,
-      "new": 0.003507,
-      "change_pct": 11.76
-    },
-    {
-      "netuid": 127,
-      "name": "Zils",
-      "kind": "mcap_up",
-      "field": "market cap",
-      "old": 10080.0,
-      "new": 11270.0,
-      "change_pct": 11.81
+      "old": 15060.0,
+      "new": 13180.0,
+      "change_pct": -12.48
     }
   ]
 }
