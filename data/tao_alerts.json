@@ -1,25 +1,43 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-13T19:59:47+00:00",
-  "previous_run": "2026-11-13T12:34:02+00:00",
+  "checked_at": "2026-11-14T01:00:18+00:00",
+  "previous_run": "2026-11-13T19:59:47+00:00",
   "alerts": [
     {
-      "netuid": 92,
-      "name": "REAX",
-      "kind": "price_down",
+      "netuid": 47,
+      "name": "Unknown",
+      "kind": "price_up",
       "field": "price",
-      "old": 0.02652,
-      "new": 0.023568,
-      "change_pct": -11.13
+      "old": 0.000738,
+      "new": 0.033266,
+      "change_pct": 4407.59
     },
     {
-      "netuid": 92,
-      "name": "REAX",
+      "netuid": 47,
+      "name": "Unknown",
       "kind": "mcap_down",
       "field": "market cap",
-      "old": 12400.0,
-      "new": 11070.0,
-      "change_pct": -10.73
+      "old": 1280.0,
+      "new": 752.34,
+      "change_pct": -41.22
+    },
+    {
+      "netuid": 50,
+      "name": "Synth",
+      "kind": "price_up",
+      "field": "price",
+      "old": 0.003021,
+      "new": 0.003455,
+      "change_pct": 14.37
+    },
+    {
+      "netuid": 50,
+      "name": "Synth",
+      "kind": "mcap_up",
+      "field": "market cap",
+      "old": 17090.0,
+      "new": 19540.0,
+      "change_pct": 14.34
     }
   ]
 }
