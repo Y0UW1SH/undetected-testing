@@ -1,43 +1,79 @@
 {
   "threshold_pct": 10.0,
-  "checked_at": "2026-11-14T01:00:18+00:00",
-  "previous_run": "2026-11-13T19:59:47+00:00",
+  "checked_at": "2026-11-14T11:43:09+00:00",
+  "previous_run": "2026-11-14T01:00:18+00:00",
   "alerts": [
+    {
+      "netuid": 24,
+      "name": "ms.computer",
+      "kind": "price_down",
+      "field": "price",
+      "old": 0.013629,
+      "new": 0.012017,
+      "change_pct": -11.83
+    },
+    {
+      "netuid": 24,
+      "name": "ms.computer",
+      "kind": "mcap_down",
+      "field": "market cap",
+      "old": 75410.0,
+      "new": 66540.0,
+      "change_pct": -11.76
+    },
+    {
+      "netuid": 35,
+      "name": "Unknown",
+      "kind": "price_down",
+      "field": "price",
+      "old": 0.012303,
+      "new": 0.005765,
+      "change_pct": -53.14
+    },
+    {
+      "netuid": 35,
+      "name": "Unknown",
+      "kind": "mcap_down",
+      "field": "market cap",
+      "old": 333.54,
+      "new": 167.17,
+      "change_pct": -49.88
+    },
     {
       "netuid": 47,
       "name": "Unknown",
-      "kind": "price_up",
+      "kind": "price_down",
       "field": "price",
-      "old": 0.000738,
-      "new": 0.033266,
-      "change_pct": 4407.59
+      "old": 0.033266,
+      "new": 0.013522,
+      "change_pct": -59.35
     },
     {
       "netuid": 47,
       "name": "Unknown",
       "kind": "mcap_down",
       "field": "market cap",
-      "old": 1280.0,
-      "new": 752.34,
-      "change_pct": -41.22
+      "old": 752.34,
+      "new": 331.21,
+      "change_pct": -55.98
     },
     {
-      "netuid": 50,
-      "name": "Synth",
+      "netuid": 102,
+      "name": "ConnitoAI",
       "kind": "price_up",
       "field": "price",
-      "old": 0.003021,
-      "new": 0.003455,
-      "change_pct": 14.37
+      "old": 0.003447,
+      "new": 0.004174,
+      "change_pct": 21.09
     },
     {
-      "netuid": 50,
-      "name": "Synth",
+      "netuid": 102,
+      "name": "ConnitoAI",
       "kind": "mcap_up",
       "field": "market cap",
-      "old": 17090.0,
-      "new": 19540.0,
-      "change_pct": 14.34
+      "old": 6050.0,
+      "new": 7330.0,
+      "change_pct": 21.16
     }
   ]
 }
