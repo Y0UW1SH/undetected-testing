@@ -1,5 +1,4 @@
 @echo off
-setlocal
-cd /d "%~dp0"
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\refresh_tao_directory.ps1" %*
+setlocal DisableDelayedExpansion
+call "%~dp0run_local.cmd" directory %*
 exit /b %errorlevel%

@@ -1,5 +1,9 @@
 # Windows wallet monitor
 
+> This legacy installer bundles the viewer, not the new local collector.
+> GitHub workflow downloads described below only apply to retained historical
+> artifacts. For ongoing collection use [the Windows source setup](../../docs/local-windows.md).
+
 Run `StealthWalletMonitor-Setup-x64.exe` on a 64-bit Windows 10 or 11 PC.
 Setup installs the application for the current user. The Start menu entry
 **Stealth Wallet Monitor** opens the desktop launcher. The setup bundles its

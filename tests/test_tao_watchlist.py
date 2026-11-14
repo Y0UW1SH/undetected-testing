@@ -87,3 +87,22 @@ def test_local_editor_save_and_watcher_override(tmp_path):
         finally:
             server.shutdown()
             task.join()
+
+
+def test_local_runner_editor_reads_local_snapshots_and_directory(tmp_path):
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config/local.json").write_text("{}")
+    folder = tmp_path / "snapshots/20261108000000"
+    folder.mkdir(parents=True)
+    (folder / "tao_collect.json").write_text(json.dumps(dict(
+        mode="discovery", checked_at="2026-11-08T00:00:00Z",
+        following=[A], performance=dict(wallets=[], rankings={}))))
+    with sqlite3.connect(tmp_path / "accounts.sqlite") as db:
+        db.execute("CREATE TABLE census_accounts(address,network)")
+        db.execute("INSERT INTO census_accounts VALUES(?,?)", (B, "finney"))
+    model = wl.Model(tmp_path)
+    data = model.data()
+    assert data["scan_count"] == 1
+    assert data["census_rows"] == 1
+    assert data["wallets"][0]["address"] == A
+    assert model.search(B[:8])[0]["address"] == B

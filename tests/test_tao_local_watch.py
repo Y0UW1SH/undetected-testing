@@ -422,3 +422,96 @@ def test_same_wallet_hotkey_switch_is_one_movement_not_two_alerts():
     assert e["event_name"] == "SubtensorModule.StakeMoved"
     assert e["src"] == e["dst"] == A
     assert e["alpha"] == e["dst_alpha"] == 6
+
+
+@pytest.mark.parametrize("bad",
+                         [None, "{broken", "[]", '{"performance": null}'])
+def test_local_report_failure_keeps_last_good_and_resumes(
+        tmp_path, monkeypatch, bad):
+    from seo import tao_local_watch as watcher
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(watcher, "_endpoint", lambda prompt: "local-test")
+    monkeypatch.setattr(watcher, "_connect", lambda url, budget: Chain())
+    src, feed, page = (tmp_path / name for name in (
+        "report.json", "feed.json", "wallets.html"))
+    src.write_text(json.dumps(dict(following=[A], performance={
+        "wallets": [], "rankings": {}})))
+    polls = []
+
+    def next_poll(seconds):
+        polls.append(json.loads(feed.read_text())["addresses"])
+        if len(polls) == 1:
+            if bad is None:
+                src.unlink()
+            else:
+                src.write_text(bad)
+        elif len(polls) == 2:
+            src.write_text(json.dumps(dict(following=[B], performance={
+                "wallets": [], "rankings": {}})))
+        else:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(watcher.time, "sleep", next_poll)
+    assert watcher.main(["--report", str(src), "--out", str(feed),
+                         "--view", str(page)]) == 130
+    assert polls == [[A], [A], [B]]
+    assert json.loads(feed.read_text())["addresses"] == [B]
+
+
+@pytest.mark.parametrize("bad",
+                         [None, "{broken", "[]", '{"performance": null}'])
+def test_invalid_initial_local_report_fails_clearly(
+        tmp_path, monkeypatch, capsys, bad):
+    from seo import tao_local_watch as watcher
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    src = tmp_path / "report.json"
+    if bad is not None:
+        src.write_text(bad)
+    assert watcher.main(["--report", str(src), "--once"]) == 2
+    assert "initial local report" in capsys.readouterr().err
+
+
+def test_local_snapshot_cache_restores_picks_and_archives_history(
+        tmp_path, monkeypatch):
+    from seo import tao_local_watch as watcher
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(watcher, "_endpoint", lambda prompt: "local-test")
+    monkeypatch.setattr(watcher, "_connect", lambda url, budget: Chain())
+    cache = tmp_path / "snapshots"
+    reports = [
+        dict(mode="discovery",
+             performance=dict(wallets=[], rankings={"buy": [A]})),
+        dict(mode="watchlist", performance=dict(wallets=[], rankings={})),
+    ]
+    for number, report in enumerate(reports, 1):
+        report["checked_at"] = f"2026-11-0{number}T00:00:00Z"
+        folder = cache / str(number)
+        folder.mkdir(parents=True)
+        (folder / "tao_collect.json").write_text(json.dumps(report))
+    latest = tmp_path / "report.json"
+    latest.write_text(json.dumps(reports[-1]))
+    assert watcher.main(["--report", str(latest), "--snapshot-cache",
+                         str(cache), "--once"]) == 0
+    feed = json.loads((tmp_path / "try_tao_out/local_wallet_activity.json"
+                       ).read_text())
+    assert feed["selection_reasons"] == {A: ["buy_timing"]}
+    page = (tmp_path / "try_tao_out/wallets.html").read_text()
+    assert 'href="../snapshots/1/wallets.html"' in page
+    assert 'href="../snapshots/2/wallets.html"' in page
+    assert (cache / "1/wallets.html").is_file()
+
+
+@pytest.mark.parametrize("flag", ["--ou", "--refresh-snapshot"])
+def test_watcher_rejects_abbreviated_managed_options(flag, monkeypatch):
+    from seo import tao_local_watch as watcher
+    monkeypatch.setenv("CI", "true")
+    argv = [flag, "outside.json"] if flag == "--ou" else [flag]
+    with pytest.raises(SystemExit) as error:
+        watcher.main(argv)
+    assert error.value.code == 2

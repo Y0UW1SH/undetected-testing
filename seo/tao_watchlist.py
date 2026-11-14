@@ -212,8 +212,10 @@ def _research_files(cache, files):
 class Model:
     def __init__(self, root):
         self.root = root
-        self.cache = root / "github_out"
-        self.db = self.cache / "taostats-directory.sqlite"
+        local = (root / "config/local.json").is_file()
+        self.cache = root / ("snapshots" if local else "github_out")
+        self.db = (root / "accounts.sqlite" if local else
+                   self.cache / "taostats-directory.sqlite")
         self.prefs = root / PREFS
 
     def _files(self):

@@ -644,11 +644,49 @@ def _persist(args, feed, report):
         from seo.tao_view import _archive, render
         html = render(report, feed)
         if args.report:
-            cache = args.view.parent
-            if getattr(args, "cached_report", False):
+            cache = getattr(args, "snapshot_cache", None) or args.view.parent
+            if getattr(args, "snapshot_cache", None):
+                from seo.tao_view import load_snapshot, run_snapshot
+                for folder in cache.iterdir() if cache.is_dir() else []:
+                    if not folder.is_dir() or not folder.name.isdecimal():
+                        continue
+                    path = run_snapshot(folder)
+                    if path is not None:
+                        try:
+                            saved = load_snapshot(path)
+                            _archive("", saved, path, cache, args.view.parent)
+                        except (OSError, ValueError, TypeError):
+                            continue
+            elif getattr(args, "cached_report", False):
                 cache = Path("github_out")
             html = _archive(html, report, args.report, cache, args.view.parent)
         _write(args.view, html)
+
+
+def _local_report(path, previous, feed):
+    """Reload local output while retaining the last valid report."""
+    try:
+        report = json.loads(path.read_text(encoding="utf-8-sig"))
+        if not isinstance(report, dict):
+            raise ValueError("report must be an object")
+        # Validate both consumers before accepting a replacement.
+        # valid JSON with the wrong shape must not stop a running watcher.
+        _selection(report, [])
+        from seo.tao_view import render
+        render(report)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError,
+            OverflowError, WatchError):
+        if previous is None:
+            raise WatchError(
+                "Cannot read the initial local report. Run a local collection "
+                "first, or supply a valid --report.") from None
+        feed["snapshot_refresh"] = dict(
+            checked_at=_now(), status="unavailable")
+        print("Local report unavailable or invalid. Continuing with the last "
+              "valid report.", flush=True)
+        return previous
+    feed["snapshot_refresh"] = dict(checked_at=_now(), status="ok")
+    return report
 
 
 def _cached_snapshot(args, previous, feed, check):
@@ -717,7 +755,7 @@ def _run(args):
             if feed.get("source") != SOURCE:
                 raise WatchError("The output already exists and is not a "
                                  "local watcher feed. Choose a new path.")
-        report = {}
+        report = None if args.report else {}
         next_snapshot = 0.
         url = None
         # Remote errors/log lines can contain the key-bearing endpoint.
@@ -733,13 +771,18 @@ def _run(args):
                         next_snapshot = start + SNAPSHOT_INTERVAL
                     report = _cached_snapshot(args, report, feed, check)
                 elif args.report:
-                    report = json.loads(args.report.read_text(encoding="utf8"))
+                    report = _local_report(args.report, report, feed)
+                else:
+                    report = {}
                 previous = feed.get("timing_selection") or {}
                 discovery = None
-                if args.cached_report and (
+                snapshot_cache = getattr(args, "snapshot_cache", None)
+                if snapshot_cache is None and args.cached_report:
+                    snapshot_cache = Path("github_out")
+                if snapshot_cache is not None and (
                         report.get("mode", "discovery") != "discovery"):
-                    discovery = _cached_discovery(Path("github_out"),
-                                                  previous.get("discovery_at"))
+                    discovery = _cached_discovery(
+                        snapshot_cache, previous.get("discovery_at"))
                 reasons, timing = _selection(report, args.address, previous,
                                              discovery)
                 from seo.tao_watchlist import apply, PREFS
@@ -801,8 +844,11 @@ def _run(args):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--report", type=Path, help="GitHub collector JSON")
+    p = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    p.add_argument("--report", type=Path,
+                   help="local collector JSON, reloaded every poll")
+    p.add_argument("--snapshot-cache", type=Path,
+                   help="local snapshot folders for selection and history")
     p.add_argument("--cached-report", action="store_true",
                    help="use the newest cached report unless --report is set")
     p.add_argument("--refresh-snapshots", action="store_true",
@@ -812,7 +858,7 @@ def main(argv=None):
     p.add_argument("--out", type=Path,
                    default=Path("try_tao_out/local_wallet_activity.json"))
     p.add_argument("--view", type=Path,
-                   default=Path("github_out/wallets.html"))
+                   default=Path("try_tao_out/wallets.html"))
     p.add_argument("--max-blocks", type=int, default=40)
     p.add_argument("--rpc-limit", type=int, default=MAX_RPC_PER_POLL,
                    help="maximum RPC requests per five-minute poll")

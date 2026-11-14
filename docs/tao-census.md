@@ -6,44 +6,19 @@ observed balance, rank and block when available. The JSON reports distinct
 coldkeys separately from address/network pairs. Wallet histories, transfer
 ties, and profitable trades require the separate wallet collector.
 
-## Run on GitHub
+## Run on your PC
 
-Start one chunk from the code checkout. The default is eight sequential pages
-of 100 rows each. The scanner also samples the last page when needed.
+Use [the Windows migration guide](local-windows.md). Restore the historical
+checkpoint once before starting. `run_local.cmd census` scans one resumable
+chunk (eight sequential pages of 100 rows by default), then stops.
+`run_local.cmd census --pages 100` advances a larger bounded chunk. Repeated
+runs resume the saved database. The local scheduler can run one chunk daily.
+There are no Actions runs, auto-dispatched successors or expiring artifacts.
 
-```console
-gh workflow run tao-census.yml --ref master -f pages=8 -f delay=2
-```
-
-To traverse the rest of the public directory, start one finite series.
-
-```console
-gh workflow run tao-census.yml --ref master -f mode=full -f delay=2 -f full_chunks=80
-```
-
-Full mode saves each chunk of up to 100 pages to the `tao-account-registry`
-branch before starting another. One runner handles up to four chunks, then
-queues one successor if the directory still has an unverified page. The
-chunk budget decreases across the series. A failed read, failed save, stale
-continuation, stalled cursor, or exhausted budget stops the series. To resume
-after inspecting the error, start a fresh dispatch. Only one census workflow
-can run at a time. Avoid direct edits to the checkpoint branch.
-
-Each scan runs on a standard GitHub-hosted Ubuntu runner. Standard hosted
-compute is free for public repositories. Private repositories draw from their
-plan's included compute. Artifact storage has a separate allowance. [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
-
-The job summary shows the latest checkpoint generation and the next page.
-Intermediate full runs upload a small JSON report for one day. Manual runs
-and terminal full runs offer the SQLite result and JSON for three days.
-The checkpoint branch keeps the cumulative data after artifacts expire.
-
-On this PC, double-click `view_tao_directory.cmd` to download the latest saved
-checkpoint and open `github_out/accounts.html`. Use `-Offline` to reuse your
-last download, or `-Follow -NoOpen` to update the view as new checkpoints
-arrive (up to 12 hours). This command doesn't start GitHub jobs. The directory
-shows holders and their balances; only the smaller group joined to wallet
-history has evidence for trading performance.
+`view_tao_directory.cmd` now builds the view from local `accounts.sqlite` and
+saved reports. It does not download or follow GitHub checkpoints. The directory
+shows holders and balances; only wallets joined to history have performance
+coverage. See the report for next-page and completeness information.
 
 ## Restore a local SQLite database
 
@@ -55,8 +30,8 @@ git clone --depth 1 --single-branch --branch tao-account-registry --no-tags http
 python -m tools.tao_census_workflow restore --state ../census-state --db data/census.sqlite
 ```
 
-On later downloads, use `git -C ../census-state pull --ff-only`. Add
-`--replace` when refreshing an existing local database, or give it a new name.
+Keep the migration clone unchanged as an original backup. Restore to a new
+filename to compare generations; do not replace an active local database.
 To reproduce an earlier checkpoint, choose its generation from a run summary
 or the ordered `generations` list in `census-checkpoint.json`.
 

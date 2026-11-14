@@ -65,14 +65,12 @@ shipping (eBay), ASIN or eBay item number and a canonical URL.
 GitHub Actions also emits `::warning::` annotations so they show on the
 run summary.
 
-## Schedule
+## Local schedule
 
-`.github/workflows/research.yml` runs `research track` daily, then the
-report and export, uploads `data/` as an artifact and commits the database,
-alerts, CSV and report back to the repository so each run can compare
-against the last. Dispatch it manually with a different config path or
-threshold from the Actions tab. Set a `SEO_PROXY` secret
-(`user:pass@host:port`) to route through a proxy.
+The hosted workflow is removed. Edit the private `config/research.json`, then
+run `run_local.cmd research`. To opt into a daily Windows job, follow the
+[local scheduling guide](local-windows.md). Databases, alerts, CSV exports and
+reports stay on your PC and are not pushed to GitHub.
 
 ## Notes
 
@@ -90,4 +88,5 @@ Amazon loads normally from GitHub Actions runners (a live capture parsed
 runners with its "Something went wrong on our end" error page, which
 `research` reports as a challenge (exit code 3 / `challenged_sessions`
 in `track`). Run eBay from a home connection or set the
-`RESEARCH_PROXY` secret (`user:pass@host:port`) for the workflow.
+explicit local `--proxy` option for a proxy you control. Keep credentials
+out of public configuration and logs.
